@@ -1,0 +1,12 @@
+pydantic>=2
+anthropic
+PyGithub
+GitPython
+docker
+pytest
+pytest-cov
+python-dotenv
+
+# Only needed once the langgraph_adapter is built (Phase 6):
+# langgraph
+# langgraph-checkpoint-sqlite
