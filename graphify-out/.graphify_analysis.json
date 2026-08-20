@@ -1,0 +1,347 @@
+{
+  "communities": {
+    "0": [
+      "core_models_humanreviewissue",
+      "fixture",
+      "github",
+      "repo",
+      "runtimeerror",
+      "tests_test_github_tools",
+      "tests_test_github_tools_bare_origin",
+      "tests_test_github_tools_fake_github_env",
+      "tests_test_github_tools_mock_comment",
+      "tests_test_github_tools_mock_gh_client",
+      "tests_test_github_tools_mock_review",
+      "tests_test_github_tools_test_get_pr_status_changes_requested_collects_body_and_inline_comments",
+      "tests_test_github_tools_test_get_pr_status_closed_unmerged",
+      "tests_test_github_tools_test_get_pr_status_ignores_bot_own_reviews_and_comments",
+      "tests_test_github_tools_test_get_pr_status_latest_review_per_user_wins",
+      "tests_test_github_tools_test_get_pr_status_merged_short_circuits_before_reading_reviews",
+      "tests_test_github_tools_test_get_pr_status_multi_reviewer_disagreement_blocks_on_any_changes_requested",
+      "tests_test_github_tools_test_get_pr_status_no_review_yet",
+      "tests_test_github_tools_test_is_configured_false_when_placeholders",
+      "tests_test_github_tools_test_is_configured_true_when_set",
+      "tests_test_github_tools_test_open_pr_creates_new_pr_when_none_exists",
+      "tests_test_github_tools_test_open_pr_raises_without_config",
+      "tests_test_github_tools_test_open_pr_returns_existing_pr_without_creating_duplicate",
+      "tests_test_github_tools_test_post_review_comment_posts_to_pr",
+      "tools_github_tools",
+      "tools_github_tools_authenticated_login",
+      "tools_github_tools_create_branch",
+      "tools_github_tools_get_github_client",
+      "tools_github_tools_get_pr_diff",
+      "tools_github_tools_get_pr_status",
+      "tools_github_tools_githubconfigerror",
+      "tools_github_tools_is_configured",
+      "tools_github_tools_local_clone",
+      "tools_github_tools_open_pr",
+      "tools_github_tools_post_review_comment",
+      "tools_github_tools_rationale_1",
+      "tools_github_tools_rationale_135",
+      "tools_github_tools_require_token"
+    ],
+    "1": [
+      "adapters_cli_adapter_run",
+      "adapters_cli_adapter_run_build_analysis_context",
+      "adapters_cli_adapter_run_build_commit_message",
+      "adapters_cli_adapter_run_build_generation_context",
+      "adapters_cli_adapter_run_build_pr_body_with_ticket",
+      "adapters_cli_adapter_run_build_pr_title",
+      "adapters_cli_adapter_run_build_review_comment",
+      "adapters_cli_adapter_run_build_review_feedback",
+      "adapters_cli_adapter_run_build_secret_feedback",
+      "adapters_cli_adapter_run_make_branch_name",
+      "adapters_cli_adapter_run_print_merge_gate_summary",
+      "adapters_cli_adapter_run_print_review_escalation_summary",
+      "adapters_cli_adapter_run_print_secret_escalation_summary",
+      "adapters_cli_adapter_run_print_summary",
+      "adapters_cli_adapter_run_rationale_1",
+      "adapters_cli_adapter_run_rationale_181",
+      "adapters_cli_adapter_run_rationale_303",
+      "adapters_cli_adapter_run_regenerate_and_push",
+      "adapters_cli_adapter_run_run",
+      "adapters_cli_adapter_run_slugify",
+      "adapters_cli_adapter_run_write_output",
+      "core_models_rationale_68",
+      "core_models_runstate",
+      "integration",
+      "skipif",
+      "tests_test_cli_adapter_smoke",
+      "tests_test_cli_adapter_smoke_rationale_20",
+      "tests_test_cli_adapter_smoke_rationale_9",
+      "tests_test_cli_adapter_smoke_test_cli_adapter_opens_pr_end_to_end",
+      "tests_test_cli_adapter_smoke_test_cli_adapter_runs_end_to_end",
+      "tools_repo_context",
+      "tools_repo_context_grep",
+      "tools_repo_context_list_files",
+      "tools_repo_context_read_file",
+      "tools_repo_context_walk_relative_paths"
+    ],
+    "2": [
+      "adapters_cli_adapter_run_build_feedback",
+      "anthropic",
+      "core_code_generator",
+      "core_code_generator_filechangedraft",
+      "core_code_generator_filechangesoutput",
+      "core_code_generator_generate",
+      "core_code_generator_py_basemodel",
+      "core_llm",
+      "core_llm_get_client",
+      "core_models",
+      "core_models_lintresults",
+      "core_models_plan",
+      "core_models_py_basemodel",
+      "core_models_reviewissue",
+      "core_models_reviewresult",
+      "core_models_testresults",
+      "core_pr_description",
+      "core_pr_description_build_pr_body",
+      "core_requirement_analyzer",
+      "core_requirement_analyzer_analyze",
+      "core_review_agent",
+      "core_review_agent_review",
+      "tests_test_core_smoke",
+      "tests_test_core_smoke_test_models_instantiate",
+      "tests_test_pr_description",
+      "tests_test_pr_description_plan",
+      "tests_test_pr_description_test_body_handles_missing_coverage_and_no_files",
+      "tests_test_pr_description_test_body_includes_summary_files_and_test_results"
+    ],
+    "3": [
+      "core_models_humanreviewresult",
+      "core_models_rationale_56",
+      "core_routing",
+      "core_routing_decide_after_human_review",
+      "core_routing_decide_after_review",
+      "core_routing_decide_after_tests",
+      "parametrize",
+      "tests_test_routing",
+      "tests_test_routing_human_state",
+      "tests_test_routing_review_state",
+      "tests_test_routing_state",
+      "tests_test_routing_test_escalate_when_review_requests_changes_and_iterations_exhausted",
+      "tests_test_routing_test_escalate_when_tests_fail_and_iterations_exhausted",
+      "tests_test_routing_test_human_review_await_human_for_non_actionable_verdicts",
+      "tests_test_routing_test_human_review_await_human_when_same_review_already_processed",
+      "tests_test_routing_test_human_review_closed_unmerged_is_terminal",
+      "tests_test_routing_test_human_review_escalate_when_round_budget_exhausted",
+      "tests_test_routing_test_human_review_merged_wins_regardless_of_verdict",
+      "tests_test_routing_test_human_review_regenerate_on_new_changes_requested",
+      "tests_test_routing_test_merge_gate_when_review_approved",
+      "tests_test_routing_test_proceed_when_tests_pass",
+      "tests_test_routing_test_raises_without_human_review",
+      "tests_test_routing_test_raises_without_review_result",
+      "tests_test_routing_test_raises_without_test_results",
+      "tests_test_routing_test_retry_when_review_requests_changes_and_iterations_remain",
+      "tests_test_routing_test_retry_when_tests_fail_and_iterations_remain"
+    ],
+    "4": [
+      "core_models_filechange",
+      "core_models_testfile",
+      "core_test_generator",
+      "core_test_generator_generate_tests",
+      "core_test_generator_py_basemodel",
+      "core_test_generator_testfiledraft",
+      "core_test_generator_testfilesoutput",
+      "dockerclient",
+      "tests_test_github_tools_test_create_branch_and_commit_and_push_against_local_repo",
+      "tools_github_tools_commit_and_push",
+      "tools_sandbox_tools",
+      "tools_sandbox_tools_ensure_image",
+      "tools_sandbox_tools_get_docker_client",
+      "tools_sandbox_tools_materialize_workspace",
+      "tools_sandbox_tools_py_path",
+      "tools_sandbox_tools_run_in_container",
+      "tools_sandbox_tools_run_lint",
+      "tools_sandbox_tools_run_tests",
+      "tools_workspace",
+      "tools_workspace_normalize_permissions",
+      "tools_workspace_py_path",
+      "tools_workspace_write_changes"
+    ],
+    "5": [
+      "tests_test_secret_scan",
+      "tests_test_secret_scan_test_clean_diff_returns_no_findings",
+      "tests_test_secret_scan_test_detects_aws_key_in_added_line",
+      "tests_test_secret_scan_test_detects_private_key_header",
+      "tests_test_secret_scan_test_ignores_obvious_placeholder_value",
+      "tests_test_secret_scan_test_ignores_secret_only_in_removed_line",
+      "tools_secret_scan",
+      "tools_secret_scan_findings_in_line",
+      "tools_secret_scan_looks_like_placeholder",
+      "tools_secret_scan_mask",
+      "tools_secret_scan_rationale_46",
+      "tools_secret_scan_scan"
+    ],
+    "6": [
+      "adapters_cli_adapter_check_pr",
+      "adapters_cli_adapter_check_pr_check_pr",
+      "adapters_cli_adapter_check_pr_rationale_1",
+      "adapters_cli_adapter_run_build_human_review_feedback",
+      "tools_state_store",
+      "tools_state_store_load",
+      "tools_state_store_py_path",
+      "tools_state_store_rationale_1",
+      "tools_state_store_save",
+      "tools_state_store_state_dir",
+      "tools_state_store_state_path"
+    ],
+    "7": [
+      "fixtures_toy_repo_calculator_ops",
+      "fixtures_toy_repo_calculator_ops_add",
+      "fixtures_toy_repo_calculator_ops_divide",
+      "fixtures_toy_repo_calculator_ops_rationale_10",
+      "fixtures_toy_repo_calculator_ops_subtract",
+      "fixtures_toy_repo_tests_test_ops",
+      "fixtures_toy_repo_tests_test_ops_test_add",
+      "fixtures_toy_repo_tests_test_ops_test_subtract"
+    ],
+    "8": [
+      "adapters_cli_adapter_init"
+    ],
+    "9": [
+      "adapters_init"
+    ],
+    "10": [
+      "core_init"
+    ],
+    "11": [
+      "fixtures_toy_repo_calculator_init"
+    ],
+    "12": [
+      "fixtures_toy_repo_tests_init"
+    ],
+    "13": [
+      "tools_init"
+    ]
+  },
+  "cohesion": {
+    "0": 0.10384068278805121,
+    "1": 0.11260504201680673,
+    "2": 0.20899470899470898,
+    "3": 0.19076923076923077,
+    "4": 0.2510822510822511,
+    "5": 0.30303030303030304,
+    "6": 0.32727272727272727,
+    "7": 0.39285714285714285,
+    "8": 1.0,
+    "9": 1.0,
+    "10": 1.0,
+    "11": 1.0,
+    "12": 1.0,
+    "13": 1.0
+  },
+  "gods": [
+    {
+      "id": "adapters_cli_adapter_run_regenerate_and_push",
+      "label": "regenerate_and_push()",
+      "degree": 31
+    },
+    {
+      "id": "core_models_runstate",
+      "label": "RunState",
+      "degree": 28
+    },
+    {
+      "id": "core_models_filechange",
+      "label": "FileChange",
+      "degree": 27
+    },
+    {
+      "id": "core_models_plan",
+      "label": "Plan",
+      "degree": 23
+    },
+    {
+      "id": "core_models_testresults",
+      "label": "TestResults",
+      "degree": 17
+    },
+    {
+      "id": "core_models_testfile",
+      "label": "TestFile",
+      "degree": 16
+    },
+    {
+      "id": "core_models_humanreviewresult",
+      "label": "HumanReviewResult",
+      "degree": 16
+    },
+    {
+      "id": "tools_github_tools_get_pr_status",
+      "label": "get_pr_status()",
+      "degree": 15
+    },
+    {
+      "id": "core_models_reviewresult",
+      "label": "ReviewResult",
+      "degree": 11
+    },
+    {
+      "id": "core_routing_decide_after_human_review",
+      "label": "decide_after_human_review()",
+      "degree": 11
+    }
+  ],
+  "surprises": [
+    {
+      "source": "GitHubConfigError",
+      "target": "FileChange",
+      "source_files": [
+        "tools/github_tools.py",
+        "core/models.py"
+      ],
+      "confidence": "INFERRED",
+      "relation": "uses",
+      "why": "inferred connection - not explicitly stated in source; connects across different repos/directories; bridges separate communities"
+    },
+    {
+      "source": "GitHubConfigError",
+      "target": "TestFile",
+      "source_files": [
+        "tools/github_tools.py",
+        "core/models.py"
+      ],
+      "confidence": "INFERRED",
+      "relation": "uses",
+      "why": "inferred connection - not explicitly stated in source; connects across different repos/directories; bridges separate communities"
+    },
+    {
+      "source": "GitHubConfigError",
+      "target": "HumanReviewResult",
+      "source_files": [
+        "tools/github_tools.py",
+        "core/models.py"
+      ],
+      "confidence": "INFERRED",
+      "relation": "uses",
+      "why": "inferred connection - not explicitly stated in source; connects across different repos/directories; bridges separate communities"
+    },
+    {
+      "source": "check_pr()",
+      "target": "decide_after_human_review()",
+      "source_files": [
+        "adapters/cli_adapter/check_pr.py",
+        "core/routing.py"
+      ],
+      "confidence": "EXTRACTED",
+      "relation": "calls",
+      "why": "connects across different repos/directories; bridges separate communities"
+    },
+    {
+      "source": "check_pr()",
+      "target": "get_pr_status()",
+      "source_files": [
+        "adapters/cli_adapter/check_pr.py",
+        "tools/github_tools.py"
+      ],
+      "confidence": "EXTRACTED",
+      "relation": "calls",
+      "why": "connects across different repos/directories; bridges separate communities"
+    }
+  ],
+  "tokens": {
+    "input": 0,
+    "output": 0
+  }
+}

@@ -7,6 +7,8 @@ pytest
 pytest-cov
 python-dotenv
 
+# ruff runs only inside the sandbox container (see sandbox/Dockerfile) -- not needed in this venv.
+
 # Only needed once the langgraph_adapter is built (Phase 6):
 # langgraph
 # langgraph-checkpoint-sqlite

@@ -3,3 +3,6 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .env
+.env.local
+run_output.json
+.agent_runs/
