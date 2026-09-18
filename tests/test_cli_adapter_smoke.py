@@ -64,7 +64,9 @@ _IOS_SCAFFOLD_REQUIREMENT = (
 def test_cli_adapter_runs_end_to_end():
     """Requires Docker running and a real ANTHROPIC_API_KEY. Excluded from the
     default `pytest` run -- run explicitly with `pytest -m integration` AND
-    AGENTDEV_RUN_INTEGRATION_TESTS=1."""
+    AGENTDEV_RUN_INTEGRATION_TESTS=1. Interactive: `run()` now always stops at
+    the plan-approval prompt, so this needs a `y` typed at the terminal (or
+    piped stdin) before it will proceed to code generation."""
     run(requirement=_IOS_SCAFFOLD_REQUIREMENT, repo_path=str(_IOS_SCAFFOLD_REPO_PATH), base_branch="main")
 
 
@@ -78,7 +80,8 @@ def test_cli_adapter_opens_pr_end_to_end():
     """Requires Docker, a real ANTHROPIC_API_KEY, and a real GITHUB_TOKEN/GITHUB_REPO
     pointing at a disposable test repo. Excluded from the default `pytest` run and
     skipped even under `-m integration` until GitHub credentials are configured AND
-    AGENTDEV_RUN_INTEGRATION_TESTS=1 is set -- this opens a real PR."""
+    AGENTDEV_RUN_INTEGRATION_TESTS=1 is set -- this opens a real PR. Interactive: see
+    test_cli_adapter_runs_end_to_end's note on the plan-approval prompt."""
     run(
         requirement=_IOS_SCAFFOLD_REQUIREMENT,
         repo_path=str(_IOS_SCAFFOLD_REPO_PATH),

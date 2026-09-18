@@ -16,7 +16,7 @@ from langgraph.types import interrupt
 
 from core import code_generator, requirement_analyzer, review_agent, test_generator
 from core.models import LintResults, RunState, TestResults
-from tools import sandbox_tools
+from tools import language_config, repo_context, sandbox_tools
 from tools.context_builders import (
     build_analysis_context,
     build_feedback,
@@ -78,7 +78,8 @@ def generate_node(state: RunState) -> dict:
 def generate_tests_node(state: RunState) -> dict:
     if state.skip_tests:
         return {}
-    test_files = test_generator.generate_tests(state.plan, state.file_changes)
+    lang = language_config.detect_language(repo_context.list_files(state.repo_url))
+    test_files = test_generator.generate_tests(state.plan, state.file_changes, lang.test_framework_hint)
     return {"test_files": test_files}
 
 

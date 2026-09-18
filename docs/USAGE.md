@@ -101,10 +101,13 @@ default. Omitting `--requirement` fails fast with a "No requirement detected" er
 running against some placeholder project; omitting `--repo-path` falls back to this project's own
 root (the nearest `.git` ancestor of your current directory), not a fixture.
 
-What happens: analyzes the requirement against the repo, generates code + tests, runs them (skip by
-default — pass `--run-tests` to enable; needs Docker), scans the diff for secrets, opens a PR, and
-requests an automated review. Approval lands at a **human merge gate** — the agent never merges its
-own PR. `--ticket-id` names the branch/PR (`feature/<your-github-login>/AD-101`) and is required to
+What happens: analyzes the requirement against the repo, then **stops and prints the Plan for your
+approval** (`Approve this plan? [y/N]`) — this always happens, before any code is written. Rejecting
+prompts for feedback and re-plans, up to `max_plan_review_rounds` (default 3), then stops the run.
+Once approved: generates code + tests, runs them (skip by default — pass `--run-tests` to enable;
+needs Docker), scans the diff for secrets, opens a PR, and requests an automated review. Approval
+lands at a **human merge gate** — the agent never merges its own PR. `--ticket-id` names the branch/PR
+(`feature/<your-github-login>/AD-101`) and is required to
 resume this later with `agentdev check`.
 
 Flags:
@@ -115,8 +118,8 @@ Flags:
 | `--repo-path PATH` | Local path to the repo the agent reads/edits (default: this project's root) |
 | `--base-branch BRANCH` | Overrides the branch resolved from `.agentdev.toml`/env/default |
 | `--ticket-id ID` | e.g. `AD-101` — branch/commit/PR naming, and the key for `agentdev check` |
-| `--skip-tests` | Skip the Docker/pytest test-and-lint step (default: on) |
-| `--run-tests` | Re-enable the Docker/pytest retry loop |
+| `--skip-tests` | Skip the Docker test-and-lint step (default: on) |
+| `--run-tests` | Re-enable the Docker test/lint retry loop (auto-detects the repo's language — see README) |
 
 ## 7. Follow up after human review
 

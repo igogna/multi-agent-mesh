@@ -143,7 +143,9 @@ def test_failing_tests_retry_generate_then_proceeds(monkeypatch):
     monkeypatch.setattr(
         test_generator,
         "generate_tests",
-        lambda plan, file_changes: [TestFile(path="test_a.py", content="def test_a(): pass")],
+        lambda plan, file_changes, test_framework_hint="pytest": [
+            TestFile(path="test_a.py", content="def test_a(): pass")
+        ],
     )
     test_run_calls = []
 

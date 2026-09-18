@@ -1,3 +1,4 @@
+import importlib.resources
 import json
 import shutil
 import tempfile
@@ -7,10 +8,26 @@ import docker
 from docker.errors import DockerException, ImageNotFound
 
 from core.models import FileChange, LintResults, TestFile, TestResults
+from tools import language_config, repo_context
 from tools.workspace import normalize_permissions, write_changes
 
-IMAGE_TAG = "coding-agent-sandbox:latest"
-DOCKERFILE_DIR = Path(__file__).resolve().parent.parent / "sandbox"
+
+def _resolve_sandbox_root() -> Path:
+    """Prefers the package data shipped in the wheel (see pyproject.toml's
+    force-include + hatch_build.py) so this works after `pip install`/`uv tool
+    install`, with no source checkout on disk; falls back to the source-
+    checkout layout so `python -m adapters.cli_adapter.run` keeps working
+    unchanged in dev."""
+    try:
+        packaged = Path(str(importlib.resources.files("adapters.cli_adapter") / "_data" / "sandbox"))
+        if packaged.is_dir():
+            return packaged
+    except (ModuleNotFoundError, FileNotFoundError):
+        pass
+    return Path(__file__).resolve().parent.parent / "sandbox"
+
+
+SANDBOX_ROOT = _resolve_sandbox_root()
 
 # Generous but bounded: a real test/lint run inside the sandbox should never
 # legitimately need this long, but a runaway/hung container must not block a
@@ -29,11 +46,21 @@ def _get_docker_client() -> docker.DockerClient:
     return client
 
 
-def _ensure_image(client: docker.DockerClient) -> None:
+def _image_tag(lang: language_config.LanguageConfig) -> str:
+    return f"coding-agent-sandbox-{lang.id}:latest"
+
+
+def _ensure_image(client: docker.DockerClient, lang: language_config.LanguageConfig) -> str:
+    tag = _image_tag(lang)
     try:
-        client.images.get(IMAGE_TAG)
+        client.images.get(tag)
     except ImageNotFound:
-        client.images.build(path=str(DOCKERFILE_DIR), tag=IMAGE_TAG)
+        client.images.build(path=str(SANDBOX_ROOT / lang.dockerfile_dir), tag=tag)
+    return tag
+
+
+def _detect_language(repo_path: str) -> language_config.LanguageConfig:
+    return language_config.detect_language(repo_context.list_files(repo_path))
 
 
 def _materialize_workspace(
@@ -47,10 +74,10 @@ def _materialize_workspace(
 
 
 def _run_in_container(
-    client: docker.DockerClient, workdir: Path, command: str | list[str]
+    client: docker.DockerClient, image_tag: str, workdir: Path, command: str | list[str]
 ) -> tuple[int, str]:
     container = client.containers.run(
-        IMAGE_TAG,
+        image_tag,
         command=command,
         volumes={str(workdir): {"bind": "/workspace", "mode": "rw"}},
         working_dir="/workspace",
@@ -70,57 +97,51 @@ def _run_in_container(
     return exit_code, output
 
 
+def _extract_coverage_pct(lang: language_config.LanguageConfig, workdir: Path) -> float | None:
+    # Only pytest-cov's coverage.json is understood today -- other languages'
+    # test commands don't produce a coverage artifact yet, so this stays None
+    # for them rather than guessing at a format.
+    if lang.id != "python":
+        return None
+    coverage_file = workdir / "coverage.json"
+    if not coverage_file.exists():
+        return None
+    try:
+        coverage_data = json.loads(coverage_file.read_text(encoding="utf-8"))
+        return coverage_data.get("totals", {}).get("percent_covered")
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
 def run_tests(
     repo_path: str, file_changes: list[FileChange], test_files: list[TestFile]
 ) -> TestResults:
+    lang = _detect_language(repo_path)
     client = _get_docker_client()
-    _ensure_image(client)
+    image_tag = _ensure_image(client, lang)
     workdir = _materialize_workspace(repo_path, file_changes, test_files)
     try:
-        exit_code, output = _run_in_container(
-            client, workdir, "pytest --cov=. --cov-report=json:coverage.json -q"
-        )
-
-        coverage_pct = None
-        coverage_file = workdir / "coverage.json"
-        if coverage_file.exists():
-            try:
-                coverage_data = json.loads(coverage_file.read_text(encoding="utf-8"))
-                coverage_pct = coverage_data.get("totals", {}).get("percent_covered")
-            except (json.JSONDecodeError, OSError):
-                pass
-
+        exit_code, output = _run_in_container(client, image_tag, workdir, lang.test_command)
+        coverage_pct = _extract_coverage_pct(lang, workdir)
         return TestResults(passed=exit_code == 0, output=output, coverage_pct=coverage_pct)
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
 
 
 def run_lint(repo_path: str, file_changes: list[FileChange]) -> LintResults:
+    lang = _detect_language(repo_path)
+    if lang.lint_command is None:
+        # No linter wired up for this language yet -- treat as a no-op pass
+        # rather than starting a container for nothing.
+        return LintResults(passed=True, issues=[])
+
     client = _get_docker_client()
-    _ensure_image(client)
+    image_tag = _ensure_image(client, lang)
     workdir = _materialize_workspace(repo_path, file_changes, [])
     try:
-        # Bind mounts from a Windows host can present every file as executable to
-        # the Linux container regardless of host permissions -- normalize inside
-        # the container before linting so ruff doesn't flag spurious EXE002s.
-        lint_command = [
-            "sh",
-            "-c",
-            "find . -type f -exec chmod 644 {} + && ruff check --output-format=json .",
-        ]
-        exit_code, output = _run_in_container(client, workdir, lint_command)
-
-        issues: list[str] = []
-        try:
-            parsed = json.loads(output)
-            issues = [
-                f"{item['filename']}:{item['location']['row']}: {item['code']} {item['message']}"
-                for item in parsed
-            ]
-        except (json.JSONDecodeError, KeyError, TypeError):
-            if exit_code != 0 and output.strip():
-                issues = [output.strip()]
-
+        exit_code, output = _run_in_container(client, image_tag, workdir, lang.lint_command)
+        parse = lang.parse_lint or language_config.default_parse_lint
+        issues = parse(output, exit_code)
         return LintResults(passed=exit_code == 0, issues=issues)
     finally:
         shutil.rmtree(workdir, ignore_errors=True)

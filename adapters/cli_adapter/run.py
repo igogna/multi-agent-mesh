@@ -34,6 +34,8 @@ from core.models import (
 from tools import (
     config,
     github_tools,
+    language_config,
+    repo_context,
     run_log,
     sandbox_tools,
     secret_scan,
@@ -62,6 +64,46 @@ def build_review_comment(review_result: ReviewResult, decision: str) -> str:
         location = f"{issue.file}:{issue.line}" if issue.line is not None else issue.file
         lines.append(f"- **{location}**: {issue.issue} (suggested fix: {issue.suggested_fix})")
     return "\n".join(lines)
+
+
+def _print_plan(plan: Plan) -> None:
+    print(f"\nPlan: {plan.summary}")
+    print(f"Files to touch: {plan.files_to_touch}")
+    print("Acceptance criteria:")
+    for criterion in plan.acceptance_criteria:
+        print(f"  - {criterion}")
+    print("Edge cases:")
+    for edge_case in plan.edge_cases:
+        print(f"  - {edge_case}")
+
+
+def _prompt_plan_decision() -> tuple[Literal["approved", "rejected"], str | None]:
+    answer = input("\nApprove this plan? [y/N]: ").strip().lower()
+    if answer == "y":
+        return "approved", None
+    feedback = input("Why not? (fed back to the planner for another attempt): ").strip()
+    return "rejected", feedback
+
+
+def get_plan_approval(state: RunState, repo_path: str, requirement: str) -> bool:
+    """Human plan-approval gate -- every `run()` call goes through this before
+    any code is generated, no exceptions. Mirrors
+    adapters/langgraph_adapter's human_plan_gate_node + decide_after_plan_review,
+    just driven by a plain input() prompt instead of a graph interrupt()."""
+    while True:
+        _print_plan(state.plan)
+        decision, feedback = _prompt_plan_decision()
+        state.plan_decision = decision
+        if decision == "approved":
+            return True
+        state.plan_feedback = feedback
+        state.plan_review_rounds += 1
+        if routing.decide_after_plan_review(state) == "escalate":
+            return False
+        print("\nRe-planning with your feedback ...")
+        state.plan = requirement_analyzer.analyze(
+            requirement, build_analysis_context(repo_path, requirement), feedback=feedback
+        )
 
 
 def build_human_review_feedback(hr: HumanReviewResult) -> str:
@@ -97,8 +139,27 @@ def build_fixup_commit_message(ticket_id: str | None, round_number: int) -> str:
     return f"{prefix}fixup! address review feedback (round {round_number})"
 
 
+_PR_TITLE_MAX_LEN = 60
+
+
+def _shorten(text: str, max_len: int) -> str:
+    """Collapses whitespace and truncates at the last word boundary before
+    max_len, so PR titles stay readable in GitHub's UI/notifications instead
+    of running to a full plan summary's length."""
+    text = " ".join(text.split())
+    if len(text) <= max_len:
+        return text
+    truncated = text[: max_len - 1].rstrip()
+    if " " in truncated:
+        truncated = truncated.rsplit(" ", 1)[0]
+    return truncated.rstrip(" .,-") + "…"
+
+
 def build_pr_title(ticket_id: str | None, plan: Plan) -> str:
-    return f"[{ticket_id}] {plan.summary}" if ticket_id else plan.summary
+    if ticket_id:
+        prefix = f"[{ticket_id}] "
+        return prefix + _shorten(plan.summary, _PR_TITLE_MAX_LEN - len(prefix))
+    return _shorten(plan.summary, _PR_TITLE_MAX_LEN)
 
 
 def build_pr_body_with_ticket(state: RunState) -> str:
@@ -192,6 +253,12 @@ def regenerate_and_push(
     Raises github_tools.GitHubConfigError if GitHub is enabled but
     misconfigured; callers are responsible for persisting state on that path.
     """
+    # Detected once per call, not per retry -- a repo's language doesn't
+    # change mid-run, and this picks the Docker image/test command/lint
+    # command sandbox_tools uses, plus the test-framework hint handed to
+    # test_generator (see tools/language_config.py).
+    lang = language_config.detect_language(repo_context.list_files(repo_path))
+
     while True:  # outer: review-retry (only iterates when run_automated_review)
         while True:  # inner: test-retry
             gen_context = build_generation_context(
@@ -215,8 +282,10 @@ def regenerate_and_push(
                 state.test_results = TestResults(passed=True, output="Tests skipped (skip_tests=True).")
                 state.lint_results = LintResults(passed=True, issues=[])
             else:
-                print("Generating tests ...")
-                state.test_files = test_generator.generate_tests(state.plan, state.file_changes)
+                print(f"Generating tests ({lang.display_name}) ...")
+                state.test_files = test_generator.generate_tests(
+                    state.plan, state.file_changes, lang.test_framework_hint
+                )
 
                 print("Running tests in sandbox ...")
                 state.test_results = sandbox_tools.run_tests(repo_path, state.file_changes, state.test_files)
@@ -373,9 +442,27 @@ def run(
         max_human_review_rounds=settings.max_human_review_rounds,
     )
 
+    detected_lang = language_config.detect_language(repo_context.list_files(repo_path))
+    print(f"Detected language: {detected_lang.display_name}")
+
     print(f"Analyzing requirement against {repo_path} ...")
     state.plan = requirement_analyzer.analyze(requirement, build_analysis_context(repo_path, requirement))
-    print(f"Plan: {state.plan.summary}")
+
+    # Mandatory human gate -- no path through this function reaches
+    # code_generator.generate() without an explicit approval. A rejection that
+    # exhausts max_plan_review_rounds stops the run here, before anything is
+    # written, rather than falling through to code generation.
+    if not get_plan_approval(state, repo_path, requirement):
+        print(
+            f"\n=== FAILED -- plan never approved after {state.plan_review_rounds} round(s) ==="
+        )
+        print(f"Last plan: {state.plan.summary}")
+        print(f"Last rejection feedback: {state.plan_feedback}")
+        write_output(state)
+        _log_run(state, settings, github_tools.is_configured(), "plan_rejected")
+        return
+
+    print(f"\nPlan approved: {state.plan.summary}")
     print(f"Files to touch: {state.plan.files_to_touch}")
 
     # NOTE: github_repo is a GitHub "owner/repo" slug, unrelated to state.repo_url

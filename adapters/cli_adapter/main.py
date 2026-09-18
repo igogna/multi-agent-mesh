@@ -5,6 +5,16 @@ subcommand's actual logic lives in its own module so this stays a thin router.
 import argparse
 import sys
 
+from dotenv import load_dotenv
+
+# Loaded here, once, for every subcommand -- run.py/check_pr.py also call this
+# themselves (needed for their `python -m adapters.cli_adapter.run` legacy
+# direct-invocation path, which never goes through this file), but bootstrap/
+# init/doctor previously didn't, so a key set only in .env (not exported into
+# the shell) worked for `agentdev run` and silently didn't for `agentdev
+# bootstrap`. Calling this twice is harmless -- load_dotenv() is idempotent.
+load_dotenv()
+
 from adapters.cli_adapter.version import __git_sha__, __version__
 
 

@@ -28,8 +28,14 @@ def is_installed() -> bool:
 
 def install() -> bool:
     """Installs the `graphifyy` package (Graphify's own PyPI name, the same
-    one its own skill installs) via pip. Returns whether it's importable
-    afterward."""
+    one its own skill installs) via pip. `graphifyy` is a declared dependency
+    (see pyproject.toml) so a fresh install normally already has it -- this
+    is the fallback for an environment that predates that, or was set up
+    some other way. `uv tool install`-managed environments ship without pip
+    (uv installs packages itself), so this bootstraps pip in first via the
+    stdlib's ensurepip; a no-op if pip is already present. Returns whether
+    graphify is importable afterward."""
+    subprocess.run([sys.executable, "-m", "ensurepip", "--upgrade"], check=False, capture_output=True)
     subprocess.run([sys.executable, "-m", "pip", "install", "-q", "graphifyy"], check=False)
     return is_installed()
 

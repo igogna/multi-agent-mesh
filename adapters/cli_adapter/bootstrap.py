@@ -71,7 +71,11 @@ def bootstrap(repo_path: str, *, interactive: bool = False) -> list[Fact]:
         print("Installing graphify ...")
         if not graphify_manager.install():
             raise RuntimeError(
-                "failed to install graphify -- install it manually (`pip install graphifyy`) and retry"
+                "failed to install graphify. If this environment has no network access to PyPI, "
+                "or ensurepip/pip still isn't available in it (common right after `uv tool "
+                "install` on an older build), reinstall with graphify bundled in: "
+                "`uv tool install agentdev --with graphifyy --force` (or, if installed via pip, "
+                "run `<path to agentdev's python> -m pip install graphifyy`), then retry."
             )
 
     if graphify_manager.has_existing_graph(repo_path):
