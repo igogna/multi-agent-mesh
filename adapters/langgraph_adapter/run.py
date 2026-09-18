@@ -14,6 +14,7 @@ adapter does not attempt to replace.
 
 import argparse
 import time
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -23,7 +24,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import Command
 
 from adapters.cli_adapter import doctor
-from adapters.cli_adapter.run import DEFAULT_REQUIREMENT, IOS_SCAFFOLD_REPO_PATH
+from adapters.cli_adapter.run import RequirementError
 from adapters.langgraph_adapter.graph import build_graph
 from core import _llm
 from core.models import RunState
@@ -79,12 +80,21 @@ def _print_outcome(state: RunState) -> None:
 
 
 def run(
-    requirement: str,
-    repo_path: str,
+    requirement: str | None,
+    repo_path: str | None,
     base_branch: str,
     ticket_id: str | None = None,
     skip_tests: bool = True,
 ) -> RunState:
+    if not requirement or not requirement.strip():
+        raise RequirementError(
+            "No requirement detected. Pass --requirement \"...\" describing the change to make "
+            "(e.g. --requirement \"Add input validation to the signup form.\")."
+        )
+    # No fixture fallback here on purpose -- an omitted --repo-path means "this
+    # project", resolved the same way `agentdev bootstrap` resolves it.
+    repo_path = repo_path or str(config.find_project_root() or Path.cwd())
+
     settings = config.resolve_settings()
     _llm.set_model(settings.model)
 
@@ -122,8 +132,16 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     adapters are drop-in equivalents from the CLI's point of view."""
     default_base_branch = config.resolve_settings().base_branch
 
-    parser.add_argument("--requirement", default=DEFAULT_REQUIREMENT)
-    parser.add_argument("--repo-path", default=str(IOS_SCAFFOLD_REPO_PATH))
+    parser.add_argument(
+        "--requirement",
+        default=None,
+        help="Natural-language description of the change to make (required)",
+    )
+    parser.add_argument(
+        "--repo-path",
+        default=None,
+        help="Local path to the repo to read/edit (default: this project's root)",
+    )
     parser.add_argument("--base-branch", default=default_base_branch)
     parser.add_argument("--ticket-id", default=None, help="e.g. AD-101 -- used as the graph's thread id")
     parser.add_argument(
@@ -147,7 +165,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     add_arguments(parser)
     args = parser.parse_args(argv)
-    run(args.requirement, args.repo_path, args.base_branch, args.ticket_id, args.skip_tests)
+    try:
+        run(args.requirement, args.repo_path, args.base_branch, args.ticket_id, args.skip_tests)
+    except RequirementError as exc:
+        parser.error(str(exc))
     return 0
 
 

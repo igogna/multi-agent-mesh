@@ -96,8 +96,10 @@ agentdev run \
   --repo-path /path/to/the/local/checkout/agentdev/should/edit
 ```
 
-**Important:** `--requirement` and `--repo-path` both default to a bundled iOS-scaffold demo, not
-your project. For real work, always pass both explicitly.
+**Important:** `--requirement` and `--repo-path` are both required — there is no bundled demo
+default. Omitting `--requirement` fails fast with a "No requirement detected" error instead of
+running against some placeholder project; omitting `--repo-path` falls back to this project's own
+root (the nearest `.git` ancestor of your current directory), not a fixture.
 
 What happens: analyzes the requirement against the repo, generates code + tests, runs them (skip by
 default — pass `--run-tests` to enable; needs Docker), scans the diff for secrets, opens a PR, and
@@ -109,8 +111,8 @@ Flags:
 
 | Flag | Meaning |
 |---|---|
-| `--requirement TEXT` | The natural-language requirement to implement |
-| `--repo-path PATH` | Local path to the repo the agent reads/edits |
+| `--requirement TEXT` | The natural-language requirement to implement (required — no default) |
+| `--repo-path PATH` | Local path to the repo the agent reads/edits (default: this project's root) |
 | `--base-branch BRANCH` | Overrides the branch resolved from `.agentdev.toml`/env/default |
 | `--ticket-id ID` | e.g. `AD-101` — branch/commit/PR naming, and the key for `agentdev check` |
 | `--skip-tests` | Skip the Docker/pytest test-and-lint step (default: on) |

@@ -26,6 +26,10 @@ from tools.context_builders import (
 
 
 def analyze_node(state: RunState) -> dict:
+    if not state.requirement or not state.requirement.strip():
+        raise ValueError(
+            "No requirement detected. Set RunState.requirement before invoking the graph."
+        )
     plan = requirement_analyzer.analyze(
         state.requirement,
         build_analysis_context(state.repo_url, state.requirement),

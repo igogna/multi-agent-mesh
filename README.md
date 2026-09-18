@@ -52,8 +52,10 @@ Install once, globally; configure per project.
    this themselves rather than pulling a shared, timestamp-churning snapshot).
 5. Run it:
    ```
-   agentdev run --ticket-id AD-101
+   agentdev run --ticket-id AD-101 --requirement "Add input validation to the signup form." --repo-path .
    ```
+   `--requirement` and `--repo-path` are required — there is no bundled demo/default target, so omitting
+   either fails fast with a "No requirement detected" error rather than silently doing nothing useful.
    Start Docker Desktop first only if you want the test/lint retry loop (`--run-tests`); it's skipped by
    default. `agentdev run` checks the fast preflight subset of `agentdev doctor` automatically and warns
    about anything missing before doing real work.

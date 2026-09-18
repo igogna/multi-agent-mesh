@@ -9,7 +9,6 @@ orchestration framework yet (that's Phase 6+).
 """
 
 import argparse
-import importlib.resources
 import re
 import time
 from pathlib import Path
@@ -48,55 +47,8 @@ from tools.context_builders import (
     build_secret_feedback,
 )
 
-def _resolve_ios_scaffold_path() -> Path:
-    """Prefers the package data shipped in the wheel (see pyproject.toml's
-    force-include + hatch_build.py) so this works after `pip install`, with no
-    source checkout on disk; falls back to the source-checkout layout so
-    `python -m adapters.cli_adapter.run` keeps working unchanged in dev."""
-    try:
-        packaged = Path(str(importlib.resources.files("adapters.cli_adapter") / "_data" / "ios_scaffold"))
-        if packaged.is_dir():
-            return packaged
-    except (ModuleNotFoundError, FileNotFoundError):
-        pass
-    return Path(__file__).resolve().parent.parent.parent / "fixtures" / "ios_scaffold"
-
-
-IOS_SCAFFOLD_REPO_PATH = _resolve_ios_scaffold_path()
-DEFAULT_REQUIREMENT = (
-    "Create a new iOS application project at the repository root. The project must build and "
-    "run on the iOS Simulator and execute its unit tests successfully from the command line. "
-    "No feature work is in scope; this requirement covers project setup only.\n"
-    "\n"
-    "Specifications\n"
-    "App name: <AppName>\n"
-    "Bundle identifier: <com.yourorg.appname>\n"
-    "Minimum deployment target: iOS 17.0\n"
-    "Language: Swift\n"
-    "One app target and one unit test target\n"
-    "The app's initial screen renders the static text Scaffold OK\n"
-    "\n"
-    "Acceptance criteria\n"
-    "xcodebuild -scheme <AppName> -destination 'platform=iOS Simulator,name=iPhone 16' build "
-    "exits with code 0.\n"
-    "xcodebuild -scheme <AppName> -destination 'platform=iOS Simulator,name=iPhone 16' test "
-    "exits with code 0 and runs at least one test that makes a real assertion.\n"
-    "The built .app installs and launches on a simulator via xcrun simctl without crashing, "
-    "and displays Scaffold OK.\n"
-    "Bundle identifier and deployment target in the built product match the values specified "
-    "above.\n"
-    ".gitignore excludes DerivedData/, *.xcuserstate, and .DS_Store.\n"
-    "No absolute filesystem paths from the build environment appear in any committed file.\n"
-    "README.md documents the exact commands to build, test, and run the app.\n"
-    "\n"
-    "Out of scope\n"
-    "Launch screen configuration, navigation, authentication, third-party dependencies, "
-    "CI workflow files.\n"
-    "\n"
-    "Definition of done\n"
-    "All acceptance criteria verified by running the stated commands, with output included "
-    "in the PR description."
-)
+class RequirementError(ValueError):
+    """Raised when a run is started with no requirement text."""
 
 
 def build_review_comment(review_result: ReviewResult, decision: str) -> str:
@@ -376,12 +328,21 @@ def _log_run(state: RunState, settings, github_enabled: bool, outcome: str) -> N
 
 
 def run(
-    requirement: str,
-    repo_path: str,
+    requirement: str | None,
+    repo_path: str | None,
     base_branch: str,
     ticket_id: str | None = None,
     skip_tests: bool = False,
 ) -> None:
+    if not requirement or not requirement.strip():
+        raise RequirementError(
+            "No requirement detected. Pass --requirement \"...\" describing the change to make "
+            "(e.g. --requirement \"Add input validation to the signup form.\")."
+        )
+    # No fixture fallback here on purpose -- an omitted --repo-path means "this
+    # project", resolved the same way `agentdev bootstrap` resolves it.
+    repo_path = repo_path or str(config.find_project_root() or Path.cwd())
+
     settings = config.resolve_settings()
     _llm.set_model(settings.model)
 
@@ -442,8 +403,16 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     so the two stay identical by construction rather than by two hand-kept flag lists."""
     default_base_branch = config.resolve_settings().base_branch
 
-    parser.add_argument("--requirement", default=DEFAULT_REQUIREMENT)
-    parser.add_argument("--repo-path", default=str(IOS_SCAFFOLD_REPO_PATH))
+    parser.add_argument(
+        "--requirement",
+        default=None,
+        help="Natural-language description of the change to make (required)",
+    )
+    parser.add_argument(
+        "--repo-path",
+        default=None,
+        help="Local path to the repo to read/edit (default: this project's root)",
+    )
     parser.add_argument("--base-branch", default=default_base_branch)
     parser.add_argument("--ticket-id", default=None, help="e.g. AD-101 -- used for branch/commit/PR naming")
     parser.add_argument(
@@ -465,7 +434,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="agentdev run", description="Run the coding-agent loop against a repo.")
     add_arguments(parser)
     args = parser.parse_args(argv)
-    run(args.requirement, args.repo_path, args.base_branch, args.ticket_id, args.skip_tests)
+    try:
+        run(args.requirement, args.repo_path, args.base_branch, args.ticket_id, args.skip_tests)
+    except RequirementError as exc:
+        parser.error(str(exc))
     return 0
 
 
