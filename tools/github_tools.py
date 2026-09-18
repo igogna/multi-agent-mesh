@@ -4,7 +4,9 @@ different thing from core.models.RunState.repo_url, which is a local
 filesystem path used for sandbox testing. Do not conflate the two.
 """
 
-import os
+import base64
+import shlex
+import subprocess
 import tempfile
 from pathlib import Path
 from typing import Literal
@@ -13,9 +15,11 @@ import git
 from github import Auth, Github
 
 from core.models import FileChange, HumanReviewIssue, HumanReviewResult, TestFile
+from tools import checks, config as agentdev_config
 from tools.workspace import normalize_permissions, write_changes
 
-_PLACEHOLDER_VALUES = {None, "", "<<GITHUB_TOKEN>>", "<<GITHUB_REPO>>", "<<GITHUB_BASE_BRANCH>>"}
+_GH_SETUP_GIT_TIMEOUT = 10
+_GITHUB_API_TIMEOUT = 15
 
 # One local clone per repo slug, reused for the life of the process (including
 # every commit within a single run, e.g. review-triggered retries onto the
@@ -39,32 +43,68 @@ class GitHubConfigError(RuntimeError):
 
 
 def is_configured() -> bool:
-    return (
-        os.environ.get("GITHUB_TOKEN") not in _PLACEHOLDER_VALUES
-        and os.environ.get("GITHUB_REPO") not in _PLACEHOLDER_VALUES
-    )
+    settings = agentdev_config.resolve_settings()
+    return settings.repo is not None and settings.github_token is not None
 
 
 def _require_token() -> str:
-    token = os.environ.get("GITHUB_TOKEN")
-    repo = os.environ.get("GITHUB_REPO")
-    if token in _PLACEHOLDER_VALUES or repo in _PLACEHOLDER_VALUES:
+    settings = agentdev_config.resolve_settings()
+    if settings.repo is None or settings.github_token is None:
         raise GitHubConfigError(
             "GITHUB_TOKEN/GITHUB_REPO are unset or still placeholders -- cannot reach GitHub."
         )
-    return token
+    return settings.github_token
 
 
 def _get_github_client(token: str) -> Github:
-    return Github(auth=Auth.Token(token))
+    return Github(auth=Auth.Token(token), timeout=_GITHUB_API_TIMEOUT)
+
+
+_gh_setup_git_done = False  # process-local: run `gh auth setup-git` at most once
+
+
+def _configure_gh_credential_helper() -> None:
+    global _gh_setup_git_done
+    if _gh_setup_git_done:
+        return
+    try:
+        subprocess.run(
+            ["gh", "auth", "setup-git"], capture_output=True, timeout=_GH_SETUP_GIT_TIMEOUT
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    _gh_setup_git_done = True
+
+
+def _github_auth_header(token: str) -> str:
+    basic = base64.b64encode(f"x-access-token:{token}".encode()).decode()
+    return f"AUTHORIZATION: Basic {basic}"
 
 
 def _local_clone(repo_slug: str, token: str) -> git.Repo:
     if repo_slug in _CLONE_CACHE:
         return git.Repo(_CLONE_CACHE[repo_slug])
     workdir = Path(tempfile.mkdtemp(prefix="github_clone_"))
-    remote = f"https://{token}@github.com/{repo_slug}.git"
-    repo = git.Repo.clone_from(remote, workdir)
+    remote = f"https://github.com/{repo_slug}.git"
+
+    if checks.gh_authenticated():
+        # gh's own git credential helper handles auth transparently -- the
+        # token never touches the URL or this clone's local git config.
+        _configure_gh_credential_helper()
+        repo = git.Repo.clone_from(remote, workdir)
+    else:
+        # No gh CLI: scope the credential to github.com specifically, set via
+        # -c on the clone command itself. Never in the remote URL -- that's
+        # what writes it into .git/config's [remote "origin"] and into git's
+        # own error output (which prints the failing URL verbatim).
+        # GitPython rejoins multi_options with spaces and re-splits them with
+        # shlex, so the header value (which itself contains a space) must be
+        # shell-quoted or that round-trip breaks it into extra tokens.
+        auth_option = f"http.https://github.com/.extraheader={_github_auth_header(token)}"
+        repo = git.Repo.clone_from(
+            remote, workdir, multi_options=["-c", shlex.quote(auth_option)], allow_unsafe_options=True
+        )
+
     _CLONE_CACHE[repo_slug] = workdir
     return repo
 
@@ -123,6 +163,14 @@ def post_review_comment(repo_url: str, pr_number: int, body: str) -> None:
     token = _require_token()
     gh_repo = _get_github_client(token).get_repo(repo_url)
     gh_repo.get_pull(pr_number).create_issue_comment(body)
+
+
+def get_current_login() -> str:
+    """The authenticated dev's GitHub login -- used to namespace branch names
+    (see adapters/cli_adapter/run.py's make_branch_name) so two devs working
+    the same ticket don't force-push over each other's branch."""
+    token = _require_token()
+    return _authenticated_login(_get_github_client(token), token)
 
 
 def _authenticated_login(client: Github, token: str) -> str:

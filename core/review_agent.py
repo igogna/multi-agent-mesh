@@ -1,4 +1,4 @@
-from core._llm import DEFAULT_MODEL, get_client
+from core._llm import get_client, get_model
 from core.models import Plan, ReviewResult, TestResults
 
 SYSTEM_PROMPT = """You are the code-review step of an automated coding agent. You do not have access \
@@ -33,11 +33,18 @@ Diff:
 """
 
     client = get_client()
-    response = client.messages.parse(
-        model=DEFAULT_MODEL,
-        max_tokens=4096,
+    # Streaming + thinking disabled: see core/code_generator.py for why --
+    # reviewing a large multi-file diff can need more than a few thousand
+    # output tokens for the issues list, and without this the model's share
+    # of the budget spent on invisible reasoning varies run to run, so the
+    # same call can truncate unpredictably even when an earlier one didn't.
+    with client.messages.stream(
+        model=get_model(),
+        max_tokens=16000,
+        thinking={"type": "disabled"},
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": user_prompt}],
         output_format=ReviewResult,
-    )
+    ) as stream:
+        response = stream.get_final_message()
     return response.parsed_output

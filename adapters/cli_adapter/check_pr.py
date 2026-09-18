@@ -10,7 +10,7 @@ running this again (by hand today; a cron/webhook can call check_pr()
 directly later without any change to this function).
 """
 
-import os
+import argparse
 
 from dotenv import load_dotenv
 
@@ -21,8 +21,8 @@ from adapters.cli_adapter.run import (
     build_human_review_feedback,
     regenerate_and_push,
 )
-from core import routing
-from tools import github_tools, state_store
+from core import _llm, routing
+from tools import config, github_tools, state_store
 
 
 def check_pr(ticket_id: str) -> None:
@@ -31,7 +31,9 @@ def check_pr(ticket_id: str) -> None:
         print(f"No PR on record for ticket {ticket_id} -- run the main pipeline first.")
         return
 
-    github_repo = os.environ.get("GITHUB_REPO")
+    settings = config.resolve_settings()
+    _llm.set_model(settings.model)
+    github_repo = settings.repo
 
     print(f"Checking PR #{state.pr_number} for ticket {ticket_id} ...")
     state.human_review = github_tools.get_pr_status(github_repo, state.pr_number)
@@ -81,13 +83,25 @@ def check_pr(ticket_id: str) -> None:
     state_store.save(state)
 
 
-if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser(
-        description="Check a PR's human review status and push a revision if changes were requested."
-    )
+def add_arguments(parser: argparse.ArgumentParser) -> None:
+    """Registers this command's flags on `parser` -- shared by `python -m
+    adapters.cli_adapter.check_pr` (below) and `agentdev check`
+    (adapters/cli_adapter/main.py)."""
     parser.add_argument("--ticket-id", required=True, help="e.g. AD-101 -- must match a prior run's ticket")
-    args = parser.parse_args()
 
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="agentdev check",
+        description="Check a PR's human review status and push a revision if changes were requested.",
+    )
+    add_arguments(parser)
+    args = parser.parse_args(argv)
     check_pr(args.ticket_id)
+    return 0
+
+
+if __name__ == "__main__":
+    import sys
+
+    sys.exit(main())

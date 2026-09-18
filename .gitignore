@@ -6,3 +6,7 @@ __pycache__/
 .env.local
 run_output.json
 .agent_runs/
+adapters/cli_adapter/_build_info.py
+graphify-out/
+.project-intelligence/
+.langgraph_api/

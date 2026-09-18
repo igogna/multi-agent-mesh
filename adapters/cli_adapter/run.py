@@ -8,7 +8,8 @@ revision -- without ever re-deriving the plan or opening a new PR. No
 orchestration framework yet (that's Phase 6+).
 """
 
-import os
+import argparse
+import importlib.resources
 import re
 import time
 from pathlib import Path
@@ -18,52 +19,84 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from core import code_generator, requirement_analyzer, review_agent, routing, test_generator
+from adapters.cli_adapter import doctor
+from adapters.cli_adapter.version import version_string
+from core import _llm, code_generator, requirement_analyzer, review_agent, routing, test_generator
 from core import pr_description
-from core.models import HumanReviewResult, LintResults, Plan, ReviewResult, RunState, TestResults
-from tools import github_tools, repo_context, sandbox_tools, secret_scan, state_store
-
-TOY_REPO_PATH = Path(__file__).resolve().parent.parent.parent / "fixtures" / "toy_repo"
-DEFAULT_REQUIREMENT = (
-    "In calculator/ops.py, make divide(a, b) raise ValueError('cannot divide by zero') "
-    "instead of crashing with ZeroDivisionError when b is 0. Normal division must still work."
+from core.models import (
+    FileChange,
+    HumanReviewResult,
+    LintResults,
+    Plan,
+    ReviewResult,
+    RunState,
+    TestResults,
+)
+from tools import (
+    config,
+    github_tools,
+    run_log,
+    sandbox_tools,
+    secret_scan,
+    state_store,
+)
+from tools.context_builders import (
+    build_analysis_context,
+    build_feedback,
+    build_generation_context,
+    build_review_feedback,
+    build_secret_feedback,
 )
 
-
-def build_analysis_context(repo_path: str) -> dict:
-    return {"files": repo_context.list_files(repo_path)}
-
-
-def build_generation_context(repo_path: str, plan) -> dict:
-    file_contents = {}
-    for path in plan.files_to_touch:
-        try:
-            file_contents[path] = repo_context.read_file(repo_path, path)
-        except FileNotFoundError:
-            pass
-    return {"files": repo_context.list_files(repo_path), "file_contents": file_contents}
-
-
-def build_feedback(test_results: TestResults, lint_results: LintResults) -> str:
-    parts = [f"Test run {'PASSED' if test_results.passed else 'FAILED'}:", test_results.output]
-    if not lint_results.passed:
-        parts.append("Lint issues:")
-        parts.extend(f"- {issue}" for issue in lint_results.issues)
-    return "\n".join(parts)
+def _resolve_ios_scaffold_path() -> Path:
+    """Prefers the package data shipped in the wheel (see pyproject.toml's
+    force-include + hatch_build.py) so this works after `pip install`, with no
+    source checkout on disk; falls back to the source-checkout layout so
+    `python -m adapters.cli_adapter.run` keeps working unchanged in dev."""
+    try:
+        packaged = Path(str(importlib.resources.files("adapters.cli_adapter") / "_data" / "ios_scaffold"))
+        if packaged.is_dir():
+            return packaged
+    except (ModuleNotFoundError, FileNotFoundError):
+        pass
+    return Path(__file__).resolve().parent.parent.parent / "fixtures" / "ios_scaffold"
 
 
-def build_secret_feedback(secrets: list[str]) -> str:
-    parts = ["Potential secrets were detected in the generated diff -- remove them before this can proceed:"]
-    parts.extend(f"- {issue}" for issue in secrets)
-    return "\n".join(parts)
-
-
-def build_review_feedback(review_result: ReviewResult) -> str:
-    parts = ["Code review requested changes:"]
-    for issue in review_result.issues:
-        location = f"{issue.file}:{issue.line}" if issue.line is not None else issue.file
-        parts.append(f"- {location}: {issue.issue} (suggested fix: {issue.suggested_fix})")
-    return "\n".join(parts)
+IOS_SCAFFOLD_REPO_PATH = _resolve_ios_scaffold_path()
+DEFAULT_REQUIREMENT = (
+    "Create a new iOS application project at the repository root. The project must build and "
+    "run on the iOS Simulator and execute its unit tests successfully from the command line. "
+    "No feature work is in scope; this requirement covers project setup only.\n"
+    "\n"
+    "Specifications\n"
+    "App name: <AppName>\n"
+    "Bundle identifier: <com.yourorg.appname>\n"
+    "Minimum deployment target: iOS 17.0\n"
+    "Language: Swift\n"
+    "One app target and one unit test target\n"
+    "The app's initial screen renders the static text Scaffold OK\n"
+    "\n"
+    "Acceptance criteria\n"
+    "xcodebuild -scheme <AppName> -destination 'platform=iOS Simulator,name=iPhone 16' build "
+    "exits with code 0.\n"
+    "xcodebuild -scheme <AppName> -destination 'platform=iOS Simulator,name=iPhone 16' test "
+    "exits with code 0 and runs at least one test that makes a real assertion.\n"
+    "The built .app installs and launches on a simulator via xcrun simctl without crashing, "
+    "and displays Scaffold OK.\n"
+    "Bundle identifier and deployment target in the built product match the values specified "
+    "above.\n"
+    ".gitignore excludes DerivedData/, *.xcuserstate, and .DS_Store.\n"
+    "No absolute filesystem paths from the build environment appear in any committed file.\n"
+    "README.md documents the exact commands to build, test, and run the app.\n"
+    "\n"
+    "Out of scope\n"
+    "Launch screen configuration, navigation, authentication, third-party dependencies, "
+    "CI workflow files.\n"
+    "\n"
+    "Definition of done\n"
+    "All acceptance criteria verified by running the stated commands, with output included "
+    "in the PR description."
+)
 
 
 def build_review_comment(review_result: ReviewResult, decision: str) -> str:
@@ -92,12 +125,15 @@ def _slugify(text: str, max_words: int = 6) -> str:
     return "-".join(words) or "change"
 
 
-def make_branch_name(ticket_id: str | None, requirement: str) -> str:
+def make_branch_name(ticket_id: str | None, requirement: str, login: str) -> str:
+    # login-namespaced so two devs working the same ticket don't force-push
+    # over each other's branch (force-push is deliberate in commit_and_push,
+    # but it must only ever land on one dev's own branch).
     if ticket_id:
-        return f"feature/{ticket_id}"
+        return f"feature/{login}/{ticket_id}"
     # Pre-ticket-ID fallback, until a PM tool (Jira/ADO/etc.) supplies a real
     # ticket per run -- not the intended long-term naming convention.
-    return f"agent/{_slugify(requirement)}-{time.strftime('%Y%m%d-%H%M%S')}"
+    return f"agent/{login}/{_slugify(requirement)}-{time.strftime('%Y%m%d-%H%M%S')}"
 
 
 def build_commit_message(ticket_id: str | None, plan: Plan) -> str:
@@ -169,7 +205,10 @@ def write_output(state: RunState) -> None:
     if state.ticket_id:
         path = state_store.save(state)
     else:
-        path = Path.cwd() / "run_output.json"
+        # Anchored to the project root (see tools/config.find_project_root),
+        # not cwd, for the same reason as .agent_runs/ in tools/state_store.py.
+        project_root = config.find_project_root() or Path.cwd()
+        path = project_root / "run_output.json"
         path.write_text(state.model_dump_json(indent=2), encoding="utf-8")
     print(f"\nFull run state written to {path}")
 
@@ -203,20 +242,35 @@ def regenerate_and_push(
     """
     while True:  # outer: review-retry (only iterates when run_automated_review)
         while True:  # inner: test-retry
-            gen_context = build_generation_context(repo_path, state.plan)
+            gen_context = build_generation_context(
+                repo_path, state.plan, previous_changes=state.file_changes or None
+            )
 
             print(f"\n--- Iteration {state.iteration} ---")
             print("Generating code changes ...")
-            state.file_changes = code_generator.generate(state.plan, gen_context, feedback)
+            new_changes = code_generator.generate(state.plan, gen_context, feedback)
+            # Merge by path rather than replacing outright: now that the model
+            # can see its prior draft (via build_generation_context's
+            # previous_changes overlay), it may reasonably leave untouched
+            # files out of its response. A plain replace would silently drop
+            # those from the project instead of carrying them forward.
+            changes_by_path = {c.path: c for c in state.file_changes}
+            changes_by_path.update({c.path: c for c in new_changes})
+            state.file_changes = list(changes_by_path.values())
 
-            print("Generating tests ...")
-            state.test_files = test_generator.generate_tests(state.plan, state.file_changes)
+            if state.skip_tests:
+                print("Skipping tests/lint (skip_tests=True) ...")
+                state.test_results = TestResults(passed=True, output="Tests skipped (skip_tests=True).")
+                state.lint_results = LintResults(passed=True, issues=[])
+            else:
+                print("Generating tests ...")
+                state.test_files = test_generator.generate_tests(state.plan, state.file_changes)
 
-            print("Running tests in sandbox ...")
-            state.test_results = sandbox_tools.run_tests(repo_path, state.file_changes, state.test_files)
+                print("Running tests in sandbox ...")
+                state.test_results = sandbox_tools.run_tests(repo_path, state.file_changes, state.test_files)
 
-            print("Running lint in sandbox ...")
-            state.lint_results = sandbox_tools.run_lint(repo_path, state.file_changes)
+                print("Running lint in sandbox ...")
+                state.lint_results = sandbox_tools.run_lint(repo_path, state.file_changes)
 
             decision = routing.decide_after_tests(state)
             print(f"Decision: {decision}")
@@ -249,7 +303,8 @@ def regenerate_and_push(
             return "escalated_secrets"
 
         if state.working_branch is None:
-            branch_name = make_branch_name(ticket_id, state.requirement)
+            login = github_tools.get_current_login()
+            branch_name = make_branch_name(ticket_id, state.requirement, login)
             print(f"Creating branch {branch_name} ...")
             github_tools.create_branch(github_repo, state.base_branch, branch_name)
             state.working_branch = branch_name
@@ -299,46 +354,122 @@ def regenerate_and_push(
         # next push lands as a new commit on the same branch/PR.
 
 
-def run(requirement: str, repo_path: str, base_branch: str, ticket_id: str | None = None) -> None:
+def _log_run(state: RunState, settings, github_enabled: bool, outcome: str) -> None:
+    """Best-effort: a logging hiccup must never take down a run that
+    otherwise completed fine (see tools/run_log.py)."""
+    try:
+        login = github_tools.get_current_login() if github_enabled else None
+    except Exception:
+        login = None
+    try:
+        run_log.append_run(
+            ticket_id=state.ticket_id,
+            repo=settings.repo,
+            dev_login=login,
+            iterations=state.iteration,
+            human_review_rounds=state.human_review_rounds,
+            outcome=outcome,
+            agentdev_version=version_string(),
+        )
+    except OSError as exc:
+        print(f"Warning: failed to write run log: {exc}")
+
+
+def run(
+    requirement: str,
+    repo_path: str,
+    base_branch: str,
+    ticket_id: str | None = None,
+    skip_tests: bool = False,
+) -> None:
+    settings = config.resolve_settings()
+    _llm.set_model(settings.model)
+
+    # Fast preflight only (no Docker check) -- surfaced as warnings, not a hard
+    # gate, since GitHub configuration is intentionally optional (see
+    # github_enabled below) and skip_tests defaults to True.
+    for result in doctor.run_fast_checks(settings):
+        if not result.passed:
+            fix_suffix = f" (fix: {result.fix})" if result.fix else ""
+            print(f"[doctor] {result.name}: {result.detail}{fix_suffix}")
+
+    # Same warn-but-don't-block shape as the doctor checks above: indexing an
+    # existing codebase costs time/tokens, so it stays opt-in rather than
+    # running implicitly inside every `agentdev run`.
+    if not (Path(repo_path) / ".project-intelligence").is_dir():
+        print(
+            "[bootstrap] No .project-intelligence/ found -- run `agentdev bootstrap` first "
+            "for better results on an existing codebase."
+        )
+
     state = RunState(
-        requirement=requirement, repo_url=repo_path, base_branch=base_branch, ticket_id=ticket_id
+        requirement=requirement,
+        repo_url=repo_path,
+        base_branch=base_branch,
+        ticket_id=ticket_id,
+        skip_tests=skip_tests,
+        max_iterations=settings.max_iterations,
+        max_human_review_rounds=settings.max_human_review_rounds,
     )
 
     print(f"Analyzing requirement against {repo_path} ...")
-    state.plan = requirement_analyzer.analyze(requirement, build_analysis_context(repo_path))
+    state.plan = requirement_analyzer.analyze(requirement, build_analysis_context(repo_path, requirement))
     print(f"Plan: {state.plan.summary}")
     print(f"Files to touch: {state.plan.files_to_touch}")
 
     # NOTE: github_repo is a GitHub "owner/repo" slug, unrelated to state.repo_url
     # (which is the local sandbox path) -- see tools/github_tools.py's module docstring.
-    github_repo = os.environ.get("GITHUB_REPO")
+    github_repo = settings.repo
     github_enabled = github_tools.is_configured()
     if not github_enabled:
         print("GITHUB_TOKEN/GITHUB_REPO not configured -- skipping GitHub PR/review phase.")
 
     try:
-        regenerate_and_push(
+        outcome = regenerate_and_push(
             state, repo_path, github_repo, github_enabled, ticket_id, feedback=None, run_automated_review=True
         )
     except github_tools.GitHubConfigError as exc:
         print(f"GitHub step failed: {exc}")
+        outcome = "github_config_error"
 
     write_output(state)
+    _log_run(state, settings, github_enabled, outcome)
+
+
+def add_arguments(parser: argparse.ArgumentParser) -> None:
+    """Registers this command's flags on `parser` -- shared by `python -m
+    adapters.cli_adapter.run` (below) and `agentdev run` (adapters/cli_adapter/main.py),
+    so the two stay identical by construction rather than by two hand-kept flag lists."""
+    default_base_branch = config.resolve_settings().base_branch
+
+    parser.add_argument("--requirement", default=DEFAULT_REQUIREMENT)
+    parser.add_argument("--repo-path", default=str(IOS_SCAFFOLD_REPO_PATH))
+    parser.add_argument("--base-branch", default=default_base_branch)
+    parser.add_argument("--ticket-id", default=None, help="e.g. AD-101 -- used for branch/commit/PR naming")
+    parser.add_argument(
+        "--skip-tests",
+        dest="skip_tests",
+        action="store_true",
+        default=True,
+        help="Skip the Docker/pytest test-and-lint step (default: on)",
+    )
+    parser.add_argument(
+        "--run-tests",
+        dest="skip_tests",
+        action="store_false",
+        help="Re-enable the Docker/pytest test-and-lint retry loop",
+    )
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="agentdev run", description="Run the coding-agent loop against a repo.")
+    add_arguments(parser)
+    args = parser.parse_args(argv)
+    run(args.requirement, args.repo_path, args.base_branch, args.ticket_id, args.skip_tests)
+    return 0
 
 
 if __name__ == "__main__":
-    import argparse
+    import sys
 
-    _base_branch_env = os.environ.get("GITHUB_BASE_BRANCH")
-    _default_base_branch = (
-        _base_branch_env if _base_branch_env and not _base_branch_env.startswith("<<") else "main"
-    )
-
-    parser = argparse.ArgumentParser(description="Run the coding-agent loop against a repo.")
-    parser.add_argument("--requirement", default=DEFAULT_REQUIREMENT)
-    parser.add_argument("--repo-path", default=str(TOY_REPO_PATH))
-    parser.add_argument("--base-branch", default=_default_base_branch)
-    parser.add_argument("--ticket-id", default=None, help="e.g. AD-101 -- used for branch/commit/PR naming")
-    args = parser.parse_args()
-
-    run(args.requirement, args.repo_path, args.base_branch, args.ticket_id)
+    sys.exit(main())

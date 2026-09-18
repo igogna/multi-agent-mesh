@@ -1,6 +1,6 @@
 from pydantic import BaseModel
 
-from core._llm import DEFAULT_MODEL, get_client
+from core._llm import get_client, get_model
 from core.models import FileChange, Plan, TestFile
 
 SYSTEM_PROMPT = """You are the test-generation step of an automated coding agent. Given a Plan and the \
@@ -37,12 +37,19 @@ New content of the changed files:
 """
 
     client = get_client()
-    response = client.messages.parse(
-        model=DEFAULT_MODEL,
-        max_tokens=8192,
+    # Streaming, not .parse(): a plan touching several/large files can need
+    # well over 8192 output tokens, and the SDK requires streaming for calls
+    # that may run long enough to need that much budget. thinking is disabled
+    # so the whole max_tokens budget goes to the actual test content instead
+    # of a variable, self-decided reasoning share (see core/code_generator.py).
+    with client.messages.stream(
+        model=get_model(),
+        max_tokens=64000,
+        thinking={"type": "disabled"},
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": user_prompt}],
         output_format=_TestFilesOutput,
-    )
+    ) as stream:
+        response = stream.get_final_message()
 
     return [TestFile(path=t.path, content=t.content) for t in response.parsed_output.tests]

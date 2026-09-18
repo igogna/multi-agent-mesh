@@ -2,7 +2,7 @@ import difflib
 
 from pydantic import BaseModel
 
-from core._llm import DEFAULT_MODEL, get_client
+from core._llm import get_client, get_model
 from core.models import FileChange, Plan
 
 SYSTEM_PROMPT = """You are the code-generation step of an automated coding agent. Given a Plan and the \
@@ -45,13 +45,18 @@ Current content of the target files:
 """
 
     client = get_client()
-    response = client.messages.parse(
-        model=DEFAULT_MODEL,
-        max_tokens=8192,
+    # Streaming, not .parse(): scaffolding several files (e.g. a full Xcode
+    # project) can need well over 8192 output tokens, and the SDK requires
+    # streaming for calls that may run long enough to need that much budget.
+    with client.messages.stream(
+        model=get_model(),
+        max_tokens=64000,
+        thinking={"type": "disabled"},
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": user_prompt}],
         output_format=_FileChangesOutput,
-    )
+    ) as stream:
+        response = stream.get_final_message()
 
     file_changes = []
     for draft in response.parsed_output.changes:

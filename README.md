@@ -25,35 +25,60 @@ Still open: no orchestration framework yet — `cli_adapter` is a plain Python l
 
 ## Setup
 
-1. `pip install -r requirements.txt`
-2. Create a `.env` in the repo root (gitignored) with:
-   ```
-   ANTHROPIC_API_KEY=<your key from console.anthropic.com>
+Install once, globally; configure per project.
 
-   # Optional -- omit to run analyze/code/test only, with no GitHub PR/review phase
-   GITHUB_TOKEN=<a token with repo access>
-   GITHUB_REPO=<owner/repo>
-   GITHUB_BASE_BRANCH=main
+1. Install the CLI:
    ```
-3. Start Docker Desktop. `tools/sandbox_tools.py` builds a sandbox image on first use and runs every test/lint invocation inside a container.
-4. Run the CLI adapter against the toy repo:
+   uv tool install agentdev
    ```
-   python -m adapters.cli_adapter.run
+   (Not published to an index yet -- install from a checkout instead: `uv tool install /path/to/this/repo`,
+   or from a built wheel: `uv tool install dist/agentdev-*.whl`.)
+2. Inside the project you want to use it on:
    ```
-   Override `--requirement` / `--repo-path` / `--base-branch` to target a different requirement or repo, and pass `--ticket-id AD-101` to get a `feature/AD-101` branch name and persist `RunState` to `.agent_runs/AD-101.json` (needed for `check_pr` below) instead of the one-off `run_output.json`.
-5. Once a human has reviewed the opened PR, check for actionable feedback and push a revision if needed:
+   agentdev init
    ```
-   python -m adapters.cli_adapter.check_pr --ticket-id AD-101
+   Detects your GitHub remote and its actual default branch, prefers an existing `gh` CLI session over
+   asking for a token, validates everything live (repo reachable, branch exists, token has push rights,
+   Anthropic key works), and writes `.agentdev.toml` (commit this) plus `~/.config/agentdev/config.toml`
+   only if a token fallback is needed (never committed).
+3. Set `ANTHROPIC_API_KEY` in your shell environment (get one at console.anthropic.com) -- picked up
+   automatically, nothing to configure for it.
+4. Index the codebase (once per checkout, and again whenever it feels stale):
+   ```
+   agentdev bootstrap
+   ```
+   Runs Graphify's structural pass plus doc ingestion and saves evidence-tagged facts under
+   `.project-intelligence/` (gitignored -- derived from your current checkout, so each teammate runs
+   this themselves rather than pulling a shared, timestamp-churning snapshot).
+5. Run it:
+   ```
+   agentdev run --ticket-id AD-101
+   ```
+   Start Docker Desktop first only if you want the test/lint retry loop (`--run-tests`); it's skipped by
+   default. `agentdev run` checks the fast preflight subset of `agentdev doctor` automatically and warns
+   about anything missing before doing real work.
+6. Once a human has reviewed the opened PR, check for actionable feedback and push a revision if needed:
+   ```
+   agentdev check --ticket-id AD-101
    ```
    Run this again any time to re-check; there's no poll loop.
+
+Run `agentdev doctor` any time to diagnose setup problems (git identity, API keys, GitHub auth and push
+rights, Docker) with a one-line fix for each. See [docs/USAGE.md](docs/USAGE.md) for the full walkthrough
+(flags, config precedence, GitHub auth resolution, troubleshooting) — that's also the doc to hand a
+teammate setting this up on their own machine for the first time.
+
+**Legacy comparison path:** `python -m adapters.cli_adapter.run` / `python -m adapters.cli_adapter.check_pr`
+still work exactly as before (`.env` + `pip install -r requirements.txt`), kept temporarily so old and new
+behavior can be compared side by side during the migration.
 
 ## Tests
 
 `pytest` runs the fast unit suite only — model smoke tests, `core/routing.py` decision branches, `tools/repo_context.py`, `tools/secret_scan.py` pattern matching, `core/pr_description.py` body formatting, and `tools/github_tools.py` against mocked GitHub/git clients. No Docker or API key required.
 
-The full end-to-end loop lives in `tests/test_cli_adapter_smoke.py`, marked `integration` and excluded by default (see `pytest.ini`):
-- `test_cli_adapter_runs_end_to_end` needs Docker running and a real `ANTHROPIC_API_KEY` — run with `pytest -m integration`.
-- `test_cli_adapter_opens_pr_end_to_end` additionally needs real `GITHUB_TOKEN`/`GITHUB_REPO` pointing at a disposable test repo, and is skipped automatically otherwise.
+The full end-to-end loop lives in `tests/test_cli_adapter_smoke.py`, marked `integration` and excluded by default (see `pytest.ini`). These make real, costly calls (a real Anthropic call; `test_cli_adapter_opens_pr_end_to_end` opens a real PR), so `-m integration` alone isn't enough to run them -- they also require `AGENTDEV_RUN_INTEGRATION_TESTS=1`, so `pytest -m integration` on reflex can't trigger one by accident:
+- `test_cli_adapter_runs_end_to_end` needs Docker running and a real `ANTHROPIC_API_KEY` — run with `AGENTDEV_RUN_INTEGRATION_TESTS=1 pytest -m integration`.
+- `test_cli_adapter_opens_pr_end_to_end` additionally needs real GitHub config pointing at a disposable test repo, and is skipped automatically otherwise.
 
 ## Full setup instructions
 

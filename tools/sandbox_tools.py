@@ -12,6 +12,11 @@ from tools.workspace import normalize_permissions, write_changes
 IMAGE_TAG = "coding-agent-sandbox:latest"
 DOCKERFILE_DIR = Path(__file__).resolve().parent.parent / "sandbox"
 
+# Generous but bounded: a real test/lint run inside the sandbox should never
+# legitimately need this long, but a runaway/hung container must not block a
+# run forever.
+CONTAINER_WAIT_TIMEOUT_SECONDS = 600
+
 
 def _get_docker_client() -> docker.DockerClient:
     try:
@@ -52,10 +57,16 @@ def _run_in_container(
         detach=True,
     )
     try:
-        exit_code = container.wait()["StatusCode"]
+        try:
+            exit_code = container.wait(timeout=CONTAINER_WAIT_TIMEOUT_SECONDS)["StatusCode"]
+        except Exception as exc:
+            container.stop(timeout=1)
+            raise RuntimeError(
+                f"Sandbox container did not finish within {CONTAINER_WAIT_TIMEOUT_SECONDS}s -- stopped it."
+            ) from exc
         output = container.logs().decode("utf-8", errors="replace")
     finally:
-        container.remove()
+        container.remove(force=True)
     return exit_code, output
 
 

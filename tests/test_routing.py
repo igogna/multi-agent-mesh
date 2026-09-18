@@ -1,7 +1,44 @@
 import pytest
 
 from core.models import HumanReviewResult, ReviewResult, RunState, TestResults
-from core.routing import decide_after_human_review, decide_after_review, decide_after_tests
+from core.routing import (
+    decide_after_human_review,
+    decide_after_plan_review,
+    decide_after_review,
+    decide_after_tests,
+)
+
+
+def _plan_review_state(
+    decision: str | None, plan_review_rounds: int, max_plan_review_rounds: int = 3
+) -> RunState:
+    return RunState(
+        requirement="req",
+        repo_url="repo",
+        base_branch="main",
+        plan_decision=decision,
+        plan_review_rounds=plan_review_rounds,
+        max_plan_review_rounds=max_plan_review_rounds,
+    )
+
+
+def test_proceed_when_plan_approved():
+    assert decide_after_plan_review(_plan_review_state("approved", plan_review_rounds=0)) == "proceed"
+
+
+def test_retry_when_plan_rejected_and_rounds_remain():
+    assert decide_after_plan_review(_plan_review_state("rejected", plan_review_rounds=0)) == "retry"
+
+
+def test_escalate_when_plan_rejected_and_rounds_exhausted():
+    state = _plan_review_state("rejected", plan_review_rounds=3, max_plan_review_rounds=3)
+    assert decide_after_plan_review(state) == "escalate"
+
+
+def test_raises_without_plan_decision():
+    state = RunState(requirement="req", repo_url="repo", base_branch="main")
+    with pytest.raises(ValueError):
+        decide_after_plan_review(state)
 
 
 def _state(passed: bool, iteration: int, max_iterations: int = 3) -> RunState:

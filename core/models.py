@@ -83,6 +83,23 @@ class RunState(BaseModel):
     review_result: Optional[ReviewResult] = None
     iteration: int = 0
     max_iterations: int = 3
+    skip_tests: bool = False
+
+    # Transient feedback for the next generate() call -- set by whichever step
+    # (tests/lint or review) just failed, read once by generate then cleared.
+    # Lets graph nodes (which only communicate via state) reproduce the same
+    # "what feedback for this retry" flow the plain while-loop threads through
+    # a local variable.
+    feedback: Optional[str] = None
+
+    # LangGraph plan-approval gate: a human approves or rejects the Plan
+    # requirement_analyzer.analyze() produces before any code is generated.
+    # Distinct budget from max_iterations, same shape as the human PR-review
+    # budget below -- this is a separate approval loop, not a code-retry loop.
+    plan_decision: Optional[Literal["approved", "rejected"]] = None
+    plan_feedback: Optional[str] = None
+    plan_review_rounds: int = 0
+    max_plan_review_rounds: int = 3
 
     # Human (GitHub) review tracking -- distinct budget/state from the
     # automated LLM review above, since it's gated by human attention across

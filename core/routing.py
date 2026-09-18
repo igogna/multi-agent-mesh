@@ -3,6 +3,16 @@ from typing import Literal
 from core.models import RunState
 
 
+def decide_after_plan_review(state: RunState) -> Literal["proceed", "retry", "escalate"]:
+    if state.plan_decision is None:
+        raise ValueError("decide_after_plan_review called before plan_decision is set")
+    if state.plan_decision == "approved":
+        return "proceed"
+    if state.plan_review_rounds < state.max_plan_review_rounds:
+        return "retry"
+    return "escalate"
+
+
 def decide_after_tests(state: RunState) -> Literal["retry", "proceed", "escalate"]:
     if state.test_results is None:
         raise ValueError("decide_after_tests called before test_results is set")

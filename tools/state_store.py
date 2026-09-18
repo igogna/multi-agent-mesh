@@ -8,13 +8,20 @@ import os
 from pathlib import Path
 
 from core.models import RunState
+from tools import config as agentdev_config
 
-_DEFAULT_STATE_DIR = Path(".agent_runs")
+_STATE_DIRNAME = ".agent_runs"
 
 
 def _state_dir() -> Path:
     override = os.environ.get("AGENT_STATE_DIR")
-    return Path(override) if override else _DEFAULT_STATE_DIR
+    if override:
+        return Path(override)
+    # Anchored to the project root (see tools/config.find_project_root), not
+    # cwd -- otherwise runs from different subdirectories of the same project
+    # would scatter state across multiple .agent_runs/ directories.
+    project_root = agentdev_config.find_project_root() or Path.cwd()
+    return project_root / _STATE_DIRNAME
 
 
 def _state_path(ticket_id: str) -> Path:
