@@ -84,27 +84,13 @@ def _github_auth_header(token: str) -> str:
 def _local_clone(repo_slug: str, token: str) -> git.Repo:
     if repo_slug in _CLONE_CACHE:
         return git.Repo(_CLONE_CACHE[repo_slug])
+        
     workdir = Path(tempfile.mkdtemp(prefix="github_clone_"))
-    remote = f"https://github.com/{repo_slug}.git"
-
-    if checks.gh_authenticated():
-        # gh's own git credential helper handles auth transparently -- the
-        # token never touches the URL or this clone's local git config.
-        _configure_gh_credential_helper()
-        repo = git.Repo.clone_from(remote, workdir)
-    else:
-        # No gh CLI: scope the credential to github.com specifically, set via
-        # -c on the clone command itself. Never in the remote URL -- that's
-        # what writes it into .git/config's [remote "origin"] and into git's
-        # own error output (which prints the failing URL verbatim).
-        # GitPython rejoins multi_options with spaces and re-splits them with
-        # shlex, so the header value (which itself contains a space) must be
-        # shell-quoted or that round-trip breaks it into extra tokens.
-        auth_option = f"http.https://github.com/.extraheader={_github_auth_header(token)}"
-        repo = git.Repo.clone_from(
-            remote, workdir, multi_options=["-c", shlex.quote(auth_option)], allow_unsafe_options=True
-        )
-
+    # Embed token directly in the remote URL to guarantee authentication for clone/push
+    remote = f"https://oauth2:{token}@github.com/{repo_slug}.git"
+    
+    repo = git.Repo.clone_from(remote, workdir)
+    
     _CLONE_CACHE[repo_slug] = workdir
     return repo
 
