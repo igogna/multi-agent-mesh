@@ -1,7 +1,20 @@
+import os
+import contextvars
 import threading
 import anthropic
 
 DEFAULT_MODEL = "claude-sonnet-5"
+
+# Thread/Task-scoped API key for multi-tenant worker isolation
+_current_api_key: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "current_api_key", default=None
+)
+
+def set_job_api_key(api_key: str | None) -> None:
+    _current_api_key.set(api_key)
+
+def get_job_api_key() -> str | None:
+    return _current_api_key.get()
 
 # Explicit rather than relying on the SDK's own default -- code_generator.py
 # and test_generator.py stream up to max_tokens=64000, which legitimately
@@ -113,6 +126,10 @@ class _ClientProxy:
 
 
 def get_client() -> anthropic.Anthropic:
-    raw_client = anthropic.Anthropic(timeout=DEFAULT_TIMEOUT_SECONDS)
+    api_key = _current_api_key.get() or os.environ.get("ANTHROPIC_API_KEY")
+    if api_key:
+        raw_client = anthropic.Anthropic(api_key=api_key, timeout=DEFAULT_TIMEOUT_SECONDS)
+    else:
+        raw_client = anthropic.Anthropic(timeout=DEFAULT_TIMEOUT_SECONDS)
     return _ClientProxy(raw_client)
 

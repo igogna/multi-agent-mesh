@@ -8,7 +8,7 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.types import Command
 from psycopg_pool import AsyncConnectionPool
 from psycopg import AsyncConnection
-from core._llm import reset_tokens, consume_step_tokens, get_accumulated_tokens
+from core._llm import reset_tokens, consume_step_tokens, get_accumulated_tokens, set_job_api_key
 
 async def update_execution_db(execution_id: int, status: str, branch_name: str = None, pr_url: str = None, commit_sha: str = None, token_usage: int = None):
     if not execution_id:
@@ -89,6 +89,12 @@ async def process_job(raw_data, graph, redis_client):
     print(f"[{ticket_id}] Picked up new job from queue! Exec ID: {execution_id}")
     print(f"[{ticket_id}] Requirement: {requirement}")
 
+    anthropic_key = job_data.get("anthropic_api_key")
+    if anthropic_key:
+        set_job_api_key(anthropic_key)
+        os.environ["ANTHROPIC_API_KEY"] = anthropic_key
+        print(f"[{ticket_id}] Configured authenticated Anthropic API key from job payload.")
+
     await update_execution_db(execution_id, "RUNNING")
 
     # 4. Setup LangGraph Config
@@ -168,6 +174,12 @@ async def resume_job(raw_data, graph, redis_client):
     decision = job_data["decision"]
     feedback = job_data.get("feedback")
     
+    anthropic_key = job_data.get("anthropic_api_key")
+    if anthropic_key:
+        set_job_api_key(anthropic_key)
+        os.environ["ANTHROPIC_API_KEY"] = anthropic_key
+        print(f"[{ticket_id}] Configured authenticated Anthropic API key from resume job payload.")
+
     config = {"configurable": {"thread_id": ticket_id}}
     resume_payload = {"decision": decision}
     if feedback:
