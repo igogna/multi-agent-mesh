@@ -119,12 +119,18 @@ def _slugify(text: str, max_words: int = 6) -> str:
     return "-".join(words) or "change"
 
 
-def make_branch_name(ticket_id: str | None, requirement: str, login: str) -> str:
+def make_branch_name(ticket_id: str | None, requirement: str, login: str, ticket_type: str = "task") -> str:
     # login-namespaced so two devs working the same ticket don't force-push
     # over each other's branch (force-push is deliberate in commit_and_push,
     # but it must only ever land on one dev's own branch).
     if ticket_id:
-        return f"feature/{login}/{ticket_id}"
+        ttype = ticket_type.lower()
+        prefix = "feature"
+        if ttype == "bug":
+            prefix = "bugfix"
+        elif ttype == "hotfix":
+            prefix = "hotfix"
+        return f"{prefix}/{login}/{ticket_id}"
     # Pre-ticket-ID fallback, until a PM tool (Jira/ADO/etc.) supplies a real
     # ticket per run -- not the intended long-term naming convention.
     return f"agent/{login}/{_slugify(requirement)}-{time.strftime('%Y%m%d-%H%M%S')}"
@@ -325,7 +331,7 @@ def regenerate_and_push(
 
         if state.working_branch is None:
             login = github_tools.get_current_login()
-            branch_name = make_branch_name(ticket_id, state.requirement, login)
+            branch_name = make_branch_name(ticket_id, state.requirement, login, "task")
             print(f"Creating branch {branch_name} ...")
             github_tools.create_branch(github_repo, state.base_branch, branch_name)
             state.working_branch = branch_name
