@@ -71,6 +71,8 @@ class RunState(BaseModel):
     requirement: str
     repo_url: str
     base_branch: str
+    target_repo: Optional[str] = None
+    ticket_type: Optional[str] = "task"
     ticket_id: Optional[str] = None
     working_branch: Optional[str] = None
     plan: Optional[Plan] = None
