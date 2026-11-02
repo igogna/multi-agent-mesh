@@ -332,9 +332,10 @@ def regenerate_and_push(
         if state.working_branch is None:
             login = github_tools.get_current_login()
             branch_name = make_branch_name(ticket_id, state.requirement, login, "task")
-            print(f"Creating branch {branch_name} ...")
-            github_tools.create_branch(github_repo, state.base_branch, branch_name)
             state.working_branch = branch_name
+
+        print(f"Preparing branch {state.working_branch} ...")
+        github_tools.create_branch(github_repo, state.base_branch, state.working_branch)
 
         print("Committing and pushing changes ...")
         github_tools.commit_and_push(
@@ -345,16 +346,15 @@ def regenerate_and_push(
             commit_message=commit_message or build_commit_message(ticket_id, state.plan),
         )
 
-        if state.pr_number is None:
-            print("Opening PR ...")
-            state.pr_number, state.pr_url = github_tools.open_pr(
-                github_repo,
-                state.working_branch,
-                state.base_branch,
-                title=build_pr_title(ticket_id, state.plan),
-                body=build_pr_body_with_ticket(state),
-            )
-            print(f"PR: {state.pr_url}")
+        print("Checking/opening PR ...")
+        state.pr_number, state.pr_url = github_tools.open_pr(
+            github_repo,
+            state.working_branch,
+            state.base_branch,
+            title=build_pr_title(ticket_id, state.plan),
+            body=build_pr_body_with_ticket(state),
+        )
+        print(f"PR: {state.pr_url}")
 
         if not run_automated_review:
             return "pushed_for_review"
@@ -408,6 +408,7 @@ def run(
     base_branch: str,
     ticket_id: str | None = None,
     skip_tests: bool = False,
+    branch: str | None = None,
 ) -> None:
     if not requirement or not requirement.strip():
         raise RequirementError(
@@ -447,6 +448,28 @@ def run(
         max_iterations=settings.max_iterations,
         max_human_review_rounds=settings.max_human_review_rounds,
     )
+
+    if branch:
+        state.working_branch = branch
+    else:
+        # If the local repo at repo_path is already checked out to a feature branch, use it
+        try:
+            local_repo = git.Repo(repo_path)
+            active = local_repo.active_branch.name
+            if active and active not in (base_branch, "main", "master"):
+                print(f"Detected active feature branch in {repo_path}: {active}")
+                state.working_branch = active
+        except Exception:
+            pass
+
+    if not state.working_branch and ticket_id:
+        prior_state = state_store.load(ticket_id)
+        if prior_state:
+            state.working_branch = prior_state.working_branch
+            state.human_review_rounds = prior_state.human_review_rounds
+            state.human_has_reviewed = prior_state.human_has_reviewed
+            if prior_state.file_changes:
+                state.file_changes = list(prior_state.file_changes)
 
     detected_lang = language_config.detect_language(repo_context.list_files(repo_path))
     print(f"Detected language: {detected_lang.display_name}")
@@ -509,6 +532,11 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--base-branch", default=default_base_branch)
     parser.add_argument("--ticket-id", default=None, help="e.g. AD-101 -- used for branch/commit/PR naming")
     parser.add_argument(
+        "--branch",
+        default=None,
+        help="Target branch to work on (default: derived from ticket ID)",
+    )
+    parser.add_argument(
         "--skip-tests",
         dest="skip_tests",
         action="store_true",
@@ -528,7 +556,14 @@ def main(argv: list[str] | None = None) -> int:
     add_arguments(parser)
     args = parser.parse_args(argv)
     try:
-        run(args.requirement, args.repo_path, args.base_branch, args.ticket_id, args.skip_tests)
+        run(
+            args.requirement,
+            args.repo_path,
+            args.base_branch,
+            args.ticket_id,
+            args.skip_tests,
+            branch=args.branch,
+        )
     except RequirementError as exc:
         parser.error(str(exc))
     return 0

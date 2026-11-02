@@ -245,3 +245,52 @@ def test_create_branch_and_commit_and_push_against_local_repo(
 
     # A second push with identical content must not raise (is_dirty guard).
     github_tools.commit_and_push("acme/widgets", "feature/AD-1", file_changes, [], "AD-1: add hello")
+
+
+def test_subsequent_runs_preserve_commits_on_existing_branch(
+    fake_github_env, monkeypatch, bare_origin, tmp_path
+):
+    clone_dir = tmp_path / "clone2"
+
+    def fake_local_clone(repo_slug, token):
+        if clone_dir.exists():
+            return git.Repo(clone_dir)
+        return git.Repo.clone_from(str(bare_origin), clone_dir)
+
+    monkeypatch.setattr(github_tools, "_local_clone", fake_local_clone)
+
+    # First task run
+    branch = github_tools.create_branch("acme/widgets", "main", "feature/FULLSTACK-001")
+    assert branch == "feature/FULLSTACK-001"
+    github_tools.commit_and_push(
+        "acme/widgets",
+        "feature/FULLSTACK-001",
+        [FileChange(path="file1.txt", diff="", full_content="v1\n")],
+        [],
+        "FULLSTACK-001: first commit",
+    )
+
+    # Second task run on the same branch
+    branch_second = github_tools.create_branch("acme/widgets", "main", "feature/FULLSTACK-001")
+    assert branch_second == "feature/FULLSTACK-001"
+    github_tools.commit_and_push(
+        "acme/widgets",
+        "feature/FULLSTACK-001",
+        [FileChange(path="file2.txt", diff="", full_content="v2\n")],
+        [],
+        "FULLSTACK-001: second commit",
+    )
+
+    # Verify remote has both commits and both files
+    check_dir = tmp_path / "check2"
+    check_repo = git.Repo.clone_from(str(bare_origin), check_dir)
+    check_repo.git.checkout("feature/FULLSTACK-001")
+
+    assert (check_dir / "file1.txt").read_text(encoding="utf-8") == "v1\n"
+    assert (check_dir / "file2.txt").read_text(encoding="utf-8") == "v2\n"
+
+    commits = list(check_repo.iter_commits("feature/FULLSTACK-001"))
+    commit_messages = [c.message.strip() for c in commits]
+    assert "FULLSTACK-001: first commit" in commit_messages
+    assert "FULLSTACK-001: second commit" in commit_messages
+    assert len(commit_messages) == 3  # initial commit + first commit + second commit

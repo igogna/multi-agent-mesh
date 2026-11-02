@@ -96,14 +96,33 @@ def _local_clone(repo_slug: str, token: str) -> git.Repo:
 
 
 def create_branch(repo_url: str, base_branch: str, branch_name: str) -> str:
+    """Prepares the working branch on the local clone:
+    - If the branch already exists on origin, check it out and pull latest
+      to preserve existing commit history.
+    - If the branch does not exist on origin yet, branch off base_branch.
+    """
     token = _require_token()
     repo = _local_clone(repo_url, token)
+    if repo.is_dirty(untracked_files=True):
+        repo.git.reset("--hard")
+        repo.git.clean("-fd")
     repo.remotes.origin.fetch()
-    repo.git.checkout(base_branch)
-    repo.remotes.origin.pull()
-    if branch_name in [head.name for head in repo.heads]:
-        repo.git.branch("-D", branch_name)
-    repo.git.checkout("-b", branch_name)
+
+    remote_branches = [ref.name for ref in repo.remotes.origin.refs]
+    remote_exists = f"origin/{branch_name}" in remote_branches
+
+    if remote_exists:
+        if branch_name in [head.name for head in repo.heads]:
+            repo.git.checkout(branch_name)
+        else:
+            repo.git.checkout("-b", branch_name, f"origin/{branch_name}")
+        repo.git.pull("origin", branch_name)
+    else:
+        repo.git.checkout(base_branch)
+        repo.remotes.origin.pull()
+        if branch_name in [head.name for head in repo.heads]:
+            repo.git.branch("-D", branch_name)
+        repo.git.checkout("-b", branch_name)
     return branch_name
 
 
@@ -124,9 +143,9 @@ def commit_and_push(
     if repo.is_dirty(untracked_files=True):
         repo.git.commit("-m", commit_message)
 
-    # Force-push is deliberate: this only ever targets agent-owned branches
-    # created by create_branch() above, never base_branch or a human's branch.
-    repo.git.push("origin", branch_name, set_upstream=True, force=True)
+    # Standard push (no force) so subsequent runs cleanly append new commits
+    # to the branch, preserving all commit history in the PR.
+    repo.git.push("origin", branch_name, set_upstream=True)
 
 
 def open_pr(
