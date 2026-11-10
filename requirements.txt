@@ -8,9 +8,9 @@ pytest-cov
 python-dotenv
 graphifyy
 
-# ruff (and other languages' lint tools) run only inside the sandbox containers
-# (see sandbox/<language>/Dockerfile) -- not needed in this venv.
-
-# Only needed once the langgraph_adapter is built (Phase 6):
-# langgraph
-# langgraph-checkpoint-sqlite
+# Worker, Queue, and Database
+redis>=5.0.0
+langgraph>=0.2.0
+langgraph-checkpoint-postgres>=2.0.0
+psycopg[binary]>=3.1.0
+psycopg-pool>=3.2.0

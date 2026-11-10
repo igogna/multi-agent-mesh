@@ -1,14 +1,23 @@
 import json
 import asyncio
+import os
 import sys
 import time
+from dotenv import load_dotenv
+
+load_dotenv()
+
 import redis.asyncio as aioredis
-from redis.exceptions import TimeoutError as RedisTimeoutError
+from redis.exceptions import TimeoutError as RedisTimeoutError, ConnectionError as RedisConnectionError
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.types import Command
 from psycopg_pool import AsyncConnectionPool
 from psycopg import AsyncConnection
 from core._llm import reset_tokens, consume_step_tokens, get_accumulated_tokens, set_job_api_key
+
+# Configuration loaded from environment variables (.env)
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/langgraph_db")
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 
 async def update_execution_db(execution_id: int, status: str, branch_name: str = None, pr_url: str = None, commit_sha: str = None, token_usage: int = None):
     if not execution_id:
@@ -68,16 +77,10 @@ async def save_execution_files(execution_id: int, file_changes: list):
     except Exception as e:
         print(f"Failed to save files: {e}")
 
-import os
-import time
 from tools import github_tools
 from adapters.cli_adapter.run import make_branch_name, build_commit_message, build_pr_title, build_pr_body_with_ticket
 from adapters.langgraph_adapter.graph import build_graph
 from core.models import RunState
-
-# Replace with your actual database credentials
-DATABASE_URL = "postgresql://postgres:postgres@localhost:5432/langgraph_db"
-REDIS_URL = "redis://localhost:6379"
 
 async def process_job(raw_data, graph, redis_client):
     """Handles the execution of a single ticket so multiple can run concurrently."""
@@ -97,13 +100,47 @@ async def process_job(raw_data, graph, redis_client):
 
     await update_execution_db(execution_id, "RUNNING")
 
+    # Resolve target repository path and token dynamically
+    target_repo = job_data.get("target_repo") or os.getenv("GITHUB_REPO")
+    github_token = job_data.get("github_token") or os.getenv("GITHUB_TOKEN")
+    repo_path = job_data.get("repo_path") or job_data.get("repo_url")
+
+    if target_repo and github_token:
+        try:
+            repo_obj = github_tools._local_clone(target_repo, github_token)
+            repo_path = str(repo_obj.working_tree_dir)
+            print(f"[{ticket_id}] Cloned target repository {target_repo} to {repo_path}")
+        except Exception as clone_err:
+            print(f"[{ticket_id}] Error cloning remote repo {target_repo}: {clone_err}")
+            if not repo_path:
+                await update_execution_db(execution_id, "FAILED")
+                await redis_client.publish("ui_updates", json.dumps({
+                    "ticket_id": ticket_id,
+                    "event_type": "error",
+                    "node": "worker",
+                    "payload": f"Failed to clone repository {target_repo}: {clone_err}"
+                }))
+                return
+
+    if not repo_path:
+        error_msg = f"Cannot process job: target_repo and github_token were not provided, and no local repo_path was found."
+        print(f"[{ticket_id}] {error_msg}")
+        await update_execution_db(execution_id, "FAILED")
+        await redis_client.publish("ui_updates", json.dumps({
+            "ticket_id": ticket_id,
+            "event_type": "error",
+            "node": "worker",
+            "payload": error_msg
+        }))
+        return
+
     # 4. Setup LangGraph Config
     config = {"configurable": {"thread_id": ticket_id}}
     initial_state = {
         "requirement": requirement,
-        "repo_url": "D:\\ai-knowledge-assistant", # Point to the target project!
+        "repo_url": repo_path,
         "base_branch": job_data.get("base_branch", "main"),
-        "target_repo": job_data.get("target_repo"),
+        "target_repo": target_repo,
         "ticket_type": job_data.get("ticket_type", "task"),
         "skip_tests": True
     }
@@ -223,10 +260,10 @@ async def resume_job(raw_data, graph, redis_client):
             
             if run_state.get("file_changes"):
                 # Authenticate github_tools
-                github_token = job_data.get("github_token")
-                if github_token:
+                github_token = job_data.get("github_token") or os.getenv("GITHUB_TOKEN")
+                target_repo = run_state.get("target_repo") or job_data.get("target_repo") or os.getenv("GITHUB_REPO")
+                if github_token and target_repo:
                     os.environ["GITHUB_TOKEN"] = github_token
-                    target_repo = run_state.get("target_repo") or job_data.get("target_repo") or "ksingh123456789/ai-knowledge-assistant"
                     os.environ["GITHUB_REPO"] = target_repo
                     
                     login = github_tools.get_current_login()
@@ -271,7 +308,7 @@ async def resume_job(raw_data, graph, redis_client):
                         "pr_url": pr_url
                     }))
                 else:
-                    print(f"[{ticket_id}] Cannot create PR: No github token provided!")
+                    print(f"[{ticket_id}] Cannot create PR: Missing github_token or target_repo!")
 
     except Exception as e:
         print(f"[{ticket_id}] Error during resume execution: {e}")
@@ -285,9 +322,16 @@ async def resume_job(raw_data, graph, redis_client):
 async def main():
     print("Initializing Python Worker...")
     
-    # 1. Connect to Redis (with health checks so it doesn't timeout when idle)
+    # 1. Connect to Redis and verify connection
+    print(f"Connecting to Redis: {REDIS_URL}...")
     redis_client = aioredis.Redis.from_url(REDIS_URL, health_check_interval=30)
-    print("Connected to Redis.")
+    try:
+        await redis_client.ping()
+        print(f"Connected to Redis successfully.")
+    except (RedisConnectionError, OSError) as e:
+        print(f"Failed to connect to Redis at {REDIS_URL}: {e}")
+        print("Please verify that Redis is running and that REDIS_URL in .env is correct.")
+        return
 
     # 2. Setup the LangGraph Checkpointer (Postgres)
     print(f"Connecting to database: {DATABASE_URL}...")
@@ -308,6 +352,10 @@ async def main():
             try:
                 result = await redis_client.brpop(['agent_resume_jobs', 'agent_jobs'], timeout=5)
             except (TimeoutError, RedisTimeoutError, asyncio.CancelledError):
+                continue
+            except (RedisConnectionError, OSError) as e:
+                print(f"Redis connection error: {e}. Retrying in 5 seconds...")
+                await asyncio.sleep(5)
                 continue
             
             if not result:
