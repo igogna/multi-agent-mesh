@@ -322,51 +322,53 @@ async def resume_job(raw_data, graph, redis_client):
 async def main():
     print("Initializing Python Worker...")
     
-    # 1. Connect to Redis and verify connection
-    print(f"Connecting to Redis: {REDIS_URL}...")
-    redis_client = aioredis.Redis.from_url(REDIS_URL, health_check_interval=30)
-    try:
-        await redis_client.ping()
-        print(f"Connected to Redis successfully.")
-    except (RedisConnectionError, OSError) as e:
-        print(f"Failed to connect to Redis at {REDIS_URL}: {e}")
-        print("Please verify that Redis is running and that REDIS_URL in .env is correct.")
-        return
+    database_url = os.getenv("DATABASE_URL", DATABASE_URL)
+    redis_url = os.getenv("REDIS_URL", REDIS_URL)
 
-    # 2. Setup the LangGraph Checkpointer (Postgres)
-    print(f"Connecting to database: {DATABASE_URL}...")
-    
-    # from_conn_string handles the connection pool and transaction logic for us
-    async with AsyncPostgresSaver.from_conn_string(DATABASE_URL) as checkpointer:
-        # This automatically creates the required tables in Postgres if they don't exist
-        await checkpointer.setup()
-        
-        # Link the DB to your graph!
-        graph = build_graph(checkpointer=checkpointer)
-        print("Graph compiled successfully. Worker is listening for jobs...")
+    # 1. Connect to Redis and verify connection (with retry loop)
+    print(f"Connecting to Redis: {redis_url}...")
+    redis_client = aioredis.Redis.from_url(redis_url, health_check_interval=30)
+    while True:
+        try:
+            await redis_client.ping()
+            print("Connected to Redis successfully.")
+            break
+        except (RedisConnectionError, OSError) as e:
+            print(f"Waiting for Redis at {redis_url}: {e}. Retrying in 10s...")
+            await asyncio.sleep(10)
 
-        # 3. Infinite loop: Watch the Redis Queue
-        while True:
-            # BRPOP blocks and waits until a job is pushed to 'agent_jobs'
-            # We use timeout=5 instead of 0 to prevent the network connection from dying while idle
-            try:
-                result = await redis_client.brpop(['agent_resume_jobs', 'agent_jobs'], timeout=5)
-            except (TimeoutError, RedisTimeoutError, asyncio.CancelledError):
-                continue
-            except (RedisConnectionError, OSError) as e:
-                print(f"Redis connection error: {e}. Retrying in 5 seconds...")
-                await asyncio.sleep(5)
-                continue
-            
-            if not result:
-                continue
-                
-            queue_name, raw_data = result
-            
-            if queue_name.decode('utf-8') == 'agent_jobs':
-                asyncio.create_task(process_job(raw_data, graph, redis_client))
-            elif queue_name.decode('utf-8') == 'agent_resume_jobs':
-                asyncio.create_task(resume_job(raw_data, graph, redis_client))
+    # 2. Setup the LangGraph Checkpointer (Postgres with retry loop)
+    print(f"Connecting to database: {database_url}...")
+    while True:
+        try:
+            async with AsyncPostgresSaver.from_conn_string(database_url) as checkpointer:
+                await checkpointer.setup()
+                graph = build_graph(checkpointer=checkpointer)
+                print("Graph compiled successfully. Worker is listening for jobs...")
+
+                # 3. Infinite loop: Watch the Redis Queue
+                while True:
+                    try:
+                        result = await redis_client.brpop(['agent_resume_jobs', 'agent_jobs'], timeout=5)
+                    except (TimeoutError, RedisTimeoutError, asyncio.CancelledError):
+                        continue
+                    except (RedisConnectionError, OSError) as e:
+                        print(f"Redis connection error: {e}. Retrying in 5 seconds...")
+                        await asyncio.sleep(5)
+                        continue
+                    
+                    if not result:
+                        continue
+                        
+                    queue_name, raw_data = result
+                    
+                    if queue_name.decode('utf-8') == 'agent_jobs':
+                        asyncio.create_task(process_job(raw_data, graph, redis_client))
+                    elif queue_name.decode('utf-8') == 'agent_resume_jobs':
+                        asyncio.create_task(resume_job(raw_data, graph, redis_client))
+        except Exception as db_err:
+            print(f"Database connection error: {db_err}. Retrying in 10s...")
+            await asyncio.sleep(10)
 if __name__ == "__main__":
     if sys.platform == 'win32':
         import selectors
