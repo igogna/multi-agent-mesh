@@ -15,10 +15,9 @@ from psycopg import AsyncConnection
 from core._llm import reset_tokens, consume_step_tokens, get_accumulated_tokens, set_job_api_key
 
 # Configuration loaded from environment variables (.env)
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/langgraph_db")
 def clean_redis_url(raw_url: str | None) -> str:
     if not raw_url:
-        return "redis://localhost:6379"
+        return ""
     url = raw_url.strip().strip('"').strip("'")
     if " -u " in url:
         url = url.split(" -u ")[-1].strip()
@@ -31,6 +30,7 @@ def clean_redis_url(raw_url: str | None) -> str:
         url = url.replace("redis://", "rediss://", 1)
     return url
 
+DATABASE_URL = os.getenv("DATABASE_URL", "")
 REDIS_URL = clean_redis_url(os.getenv("REDIS_URL"))
 
 async def update_execution_db(execution_id: int, status: str, branch_name: str = None, pr_url: str = None, commit_sha: str = None, token_usage: int = None):
@@ -336,8 +336,15 @@ async def resume_job(raw_data, graph, redis_client):
 async def main():
     print("Initializing Python Worker...")
     
-    database_url = os.getenv("DATABASE_URL", DATABASE_URL)
-    redis_url = clean_redis_url(os.getenv("REDIS_URL", REDIS_URL))
+    database_url = os.getenv("DATABASE_URL") or DATABASE_URL
+    redis_url = clean_redis_url(os.getenv("REDIS_URL") or REDIS_URL)
+
+    if not redis_url:
+        print("ERROR: REDIS_URL is not configured in .env or environment variables.")
+        return
+    if not database_url:
+        print("ERROR: DATABASE_URL is not configured in .env or environment variables.")
+        return
 
     # 1. Connect to Redis and verify connection (with retry loop)
     print(f"Connecting to Redis: {redis_url}...")
