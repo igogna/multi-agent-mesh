@@ -17,7 +17,22 @@ from core._llm import reset_tokens, consume_step_tokens, get_accumulated_tokens,
 
 # Configuration loaded from environment variables (.env)
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/langgraph_db")
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
+def clean_redis_url(raw_url: str | None) -> str:
+    if not raw_url:
+        return "redis://localhost:6379"
+    url = raw_url.strip().strip('"').strip("'")
+    if " -u " in url:
+        url = url.split(" -u ")[-1].strip()
+    elif url.startswith("redis-cli"):
+        for part in url.split():
+            if part.startswith("redis://") or part.startswith("rediss://"):
+                url = part
+                break
+    if "upstash.io" in url and url.startswith("redis://"):
+        url = url.replace("redis://", "rediss://", 1)
+    return url
+
+REDIS_URL = clean_redis_url(os.getenv("REDIS_URL"))
 
 async def update_execution_db(execution_id: int, status: str, branch_name: str = None, pr_url: str = None, commit_sha: str = None, token_usage: int = None):
     if not execution_id:
@@ -323,7 +338,7 @@ async def main():
     print("Initializing Python Worker...")
     
     database_url = os.getenv("DATABASE_URL", DATABASE_URL)
-    redis_url = os.getenv("REDIS_URL", REDIS_URL)
+    redis_url = clean_redis_url(os.getenv("REDIS_URL", REDIS_URL))
 
     # 1. Connect to Redis and verify connection (with retry loop)
     print(f"Connecting to Redis: {redis_url}...")
