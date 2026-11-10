@@ -33,7 +33,7 @@ def clean_redis_url(raw_url: str | None) -> str:
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 REDIS_URL = clean_redis_url(os.getenv("REDIS_URL"))
 
-async def update_execution_db(execution_id: int, status: str, branch_name: str = None, pr_url: str = None, commit_sha: str = None, token_usage: int = None):
+async def update_execution_db(execution_id: int, status: str, branch_name: str = None, pr_url: str = None, commit_sha: str = None, token_usage: int = None, error: str = None):
     if not execution_id:
         return
     query = "UPDATE executions SET status = %s"
@@ -47,6 +47,9 @@ async def update_execution_db(execution_id: int, status: str, branch_name: str =
     if commit_sha:
         query += ", commit_sha = %s"
         params.append(commit_sha)
+    if error:
+        query += ", error = %s"
+        params.append(error)
     
     if status in ["COMPLETED", "FAILED"]:
         query += ", completed_at = CURRENT_TIMESTAMP"
@@ -127,19 +130,20 @@ async def process_job(raw_data, graph, redis_client):
         except Exception as clone_err:
             print(f"[{ticket_id}] Error cloning remote repo {target_repo}: {clone_err}")
             if not repo_path:
-                await update_execution_db(execution_id, "FAILED")
+                clone_msg = f"Failed to clone repository {target_repo}: {clone_err}"
+                await update_execution_db(execution_id, "FAILED", error=clone_msg)
                 await redis_client.publish("ui_updates", json.dumps({
                     "ticket_id": ticket_id,
                     "event_type": "error",
                     "node": "worker",
-                    "payload": f"Failed to clone repository {target_repo}: {clone_err}"
+                    "payload": clone_msg
                 }))
                 return
 
     if not repo_path:
         error_msg = f"Cannot process job: target_repo and github_token were not provided, and no local repo_path was found."
         print(f"[{ticket_id}] {error_msg}")
-        await update_execution_db(execution_id, "FAILED")
+        await update_execution_db(execution_id, "FAILED", error=error_msg)
         await redis_client.publish("ui_updates", json.dumps({
             "ticket_id": ticket_id,
             "event_type": "error",
@@ -211,7 +215,7 @@ async def process_job(raw_data, graph, redis_client):
             await update_execution_db(execution_id, "COMPLETED", token_usage=total_tokens)
     except Exception as e:
         print(f"[{ticket_id}] Error during execution: {e}")
-        await update_execution_db(execution_id, "FAILED")
+        await update_execution_db(execution_id, "FAILED", error=str(e))
         await redis_client.publish("ui_updates", json.dumps({
             "ticket_id": ticket_id,
             "event_type": "error",
@@ -326,6 +330,8 @@ async def resume_job(raw_data, graph, redis_client):
 
     except Exception as e:
         print(f"[{ticket_id}] Error during resume execution: {e}")
+        execution_id = job_data.get("execution_id")
+        await update_execution_db(execution_id, "FAILED", error=str(e))
         await redis_client.publish("ui_updates", json.dumps({
             "ticket_id": ticket_id,
             "event_type": "error",
