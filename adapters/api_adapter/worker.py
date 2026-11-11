@@ -168,7 +168,7 @@ async def process_job(raw_data, graph, redis_client):
     reset_tokens()
     node_start_times = {}
     try:
-        async for event in graph.astream_events(initial_state, config, version="v1"):
+        async for event in graph.astream_events(initial_state, config, version="v2"):
             event_type = event.get("event")
             node_name = event.get("name")
             
@@ -243,7 +243,7 @@ async def resume_job(raw_data, graph, redis_client):
     print(f"[{ticket_id}] Resuming execution with decision: {decision}")
     node_start_times = {}
     try:
-        async for event in graph.astream_events(Command(resume=resume_payload), config, version="v1"):
+        async for event in graph.astream_events(Command(resume=resume_payload), config, version="v2"):
             event_type = event.get("event")
             node_name = event.get("name")
             
