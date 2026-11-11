@@ -26,6 +26,7 @@ from langgraph.types import Command
 from adapters.cli_adapter import doctor
 from adapters.cli_adapter.run import RequirementError
 from adapters.langgraph_adapter.graph import build_graph
+from adapters.langgraph_adapter.serde import get_checkpoint_serde
 from core import _llm
 from core.models import RunState
 from tools import config
@@ -103,7 +104,7 @@ def run(
             fix_suffix = f" (fix: {result.fix})" if result.fix else ""
             print(f"[doctor] {result.name}: {result.detail}{fix_suffix}")
 
-    graph = build_graph(checkpointer=MemorySaver())
+    graph = build_graph(checkpointer=MemorySaver(serde=get_checkpoint_serde()))
     initial_state = RunState(
         requirement=requirement,
         repo_url=repo_path,

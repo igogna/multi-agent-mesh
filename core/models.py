@@ -16,11 +16,13 @@ class FileChange(BaseModel):
 
 
 class TestFile(BaseModel):
+    __test__ = False
     path: str
     content: str
 
 
 class TestResults(BaseModel):
+    __test__ = False
     passed: bool
     output: str
     coverage_pct: Optional[float] = None

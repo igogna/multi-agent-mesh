@@ -10,6 +10,7 @@ import redis.asyncio as aioredis
 from redis.exceptions import TimeoutError as RedisTimeoutError, ConnectionError as RedisConnectionError
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.types import Command
+from adapters.langgraph_adapter.serde import get_checkpoint_serde
 from psycopg_pool import AsyncConnectionPool
 from psycopg import AsyncConnection
 from core._llm import reset_tokens, consume_step_tokens, get_accumulated_tokens, set_job_api_key
@@ -366,9 +367,10 @@ async def main():
 
     # 2. Setup the LangGraph Checkpointer (Postgres with retry loop)
     print(f"Connecting to database: {database_url}...")
+    serde = get_checkpoint_serde()
     while True:
         try:
-            async with AsyncPostgresSaver.from_conn_string(database_url) as checkpointer:
+            async with AsyncPostgresSaver.from_conn_string(database_url, serde=serde) as checkpointer:
                 await checkpointer.setup()
                 graph = build_graph(checkpointer=checkpointer)
                 print("Graph compiled successfully. Worker is listening for jobs...")

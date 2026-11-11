@@ -26,8 +26,12 @@ from adapters.langgraph_adapter.nodes import (
     review_node,
     run_tests_node,
 )
+from adapters.langgraph_adapter.serde import configure_default_serde
 from core.models import RunState
 from core.routing import decide_after_plan_review, decide_after_review, decide_after_tests
+
+# Allow core.models types in all LangGraph checkpointers by default
+configure_default_serde()
 
 
 def build_graph(checkpointer=None):
