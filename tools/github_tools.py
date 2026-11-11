@@ -5,6 +5,7 @@ filesystem path used for sandbox testing. Do not conflate the two.
 """
 
 import base64
+import os
 import shlex
 import subprocess
 import tempfile
@@ -81,15 +82,55 @@ def _github_auth_header(token: str) -> str:
     return f"AUTHORIZATION: Basic {basic}"
 
 
+def _ensure_git_identity(repo: git.Repo, token: str) -> None:
+    """Ensure the repository has user.name and user.email configured so git commits
+    never fail in headless/cloud container environments (like Render or Docker)."""
+    name = "AgentDev Bot"
+    email = "agentdev-bot@users.noreply.github.com"
+    try:
+        client = _get_github_client(token)
+        user = client.get_user()
+        if user.name:
+            name = user.name
+        elif user.login:
+            name = user.login
+        if user.email:
+            email = user.email
+        elif user.login:
+            email = f"{user.login}@users.noreply.github.com"
+    except Exception:
+        pass
+
+    try:
+        with repo.config_writer() as config:
+            config.set_value("user", "name", name)
+            config.set_value("user", "email", email)
+    except Exception:
+        try:
+            repo.git.config("user.name", name)
+            repo.git.config("user.email", email)
+        except Exception:
+            pass
+
+    # Process-level fallback for git CLI
+    os.environ["GIT_AUTHOR_NAME"] = name
+    os.environ["GIT_AUTHOR_EMAIL"] = email
+    os.environ["GIT_COMMITTER_NAME"] = name
+    os.environ["GIT_COMMITTER_EMAIL"] = email
+
+
 def _local_clone(repo_slug: str, token: str) -> git.Repo:
     if repo_slug in _CLONE_CACHE:
-        return git.Repo(_CLONE_CACHE[repo_slug])
+        repo = git.Repo(_CLONE_CACHE[repo_slug])
+        _ensure_git_identity(repo, token)
+        return repo
         
     workdir = Path(tempfile.mkdtemp(prefix="github_clone_"))
     # Embed token directly in the remote URL to guarantee authentication for clone/push
     remote = f"https://oauth2:{token}@github.com/{repo_slug}.git"
     
     repo = git.Repo.clone_from(remote, workdir)
+    _ensure_git_identity(repo, token)
     
     _CLONE_CACHE[repo_slug] = workdir
     return repo
@@ -116,6 +157,7 @@ def commit_and_push(
 ) -> None:
     token = _require_token()
     repo = _local_clone(repo_url, token)
+    _ensure_git_identity(repo, token)
     workdir = Path(repo.working_tree_dir)
     write_changes(workdir, file_changes, test_files)
     normalize_permissions(workdir)

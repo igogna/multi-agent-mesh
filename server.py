@@ -3,6 +3,12 @@ import os
 import sys
 from adapters.api_adapter.worker import main as run_worker
 
+# Ensure git identity fallbacks are present in container environments
+os.environ.setdefault("GIT_AUTHOR_NAME", "AgentDev Bot")
+os.environ.setdefault("GIT_AUTHOR_EMAIL", "agentdev-bot@users.noreply.github.com")
+os.environ.setdefault("GIT_COMMITTER_NAME", "AgentDev Bot")
+os.environ.setdefault("GIT_COMMITTER_EMAIL", "agentdev-bot@users.noreply.github.com")
+
 async def handle_http_request(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
     """Simple lightweight HTTP handler for Render health checks (no external dependencies needed)."""
     try:
